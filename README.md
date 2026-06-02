@@ -29,7 +29,7 @@ https://podkop.net/
 
 Вкратце, достаточно одного скрипта для установки и обновления:
 ```
-sh <(wget -O - https://raw.githubusercontent.com/yandexru45/podkop-evolution/refs/heads/main/install.sh)
+sh <(wget -O - https://raw.githubusercontent.com/Jedakaya/podkop-forge/refs/heads/main/install.sh)
 ```
 
 ## Новое в этом форке: Подписки (Subscription)
@@ -79,7 +79,7 @@ mv /etc/config/podkop /etc/config/podkop-070
 ```
 2. Стянуть новый дефолтный конфиг:
 ```
-wget -O /etc/config/podkop https://raw.githubusercontent.com/yandexru45/podkop-evolution/refs/heads/main/podkop/files/etc/config/podkop
+wget -O /etc/config/podkop https://raw.githubusercontent.com/Jedakaya/podkop-forge/refs/heads/main/podkop/files/etc/config/podkop
 ```
 3. Настроить заново ваш Podkop через Luci или UCI.
 
