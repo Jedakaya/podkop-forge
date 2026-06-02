@@ -332,7 +332,7 @@ wait_for_subscription_connectivity() {
         [ "$attempt" -lt "$attempts" ] && sleep "$wait"
     done
 
-    log "Subscription connectivity check failed for section '$section' after $attempts attempts" "error"
+    log "Subscription connectivity check failed for section '$section' after $attempts attempts" "warn"
     return 1
 }
 
