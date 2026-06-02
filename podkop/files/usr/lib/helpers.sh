@@ -671,16 +671,17 @@ download_subscription() {
         if should_force_wget_ipv4 "$url"; then
             family="ipv4"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -4 -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o "$tmpfile" \
+                    "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
                     --header "User-Agent: singbox/$sb_version" \
@@ -694,16 +695,17 @@ download_subscription() {
             fi
         else
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o "$tmpfile" \
+                    "$url" 2>"$errfile"
             else
                 wget -T "$timeout" -O "$tmpfile" \
                     --header "User-Agent: singbox/$sb_version" \
@@ -739,16 +741,17 @@ download_subscription() {
             family="ipv4"
             log "Retrying subscription download over IPv4-only" "warn"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -4 -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o "$tmpfile" \
+                    "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
                     --header "User-Agent: singbox/$sb_version" \
@@ -806,16 +809,17 @@ check_subscription_connectivity() {
         if should_force_wget_ipv4 "$url"; then
             family="ipv4"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -q -4 -T "$timeout" -O /dev/null \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o /dev/null \
+                    "$url" 2>"$errfile"
             else
                 wget -q -4 -T "$timeout" -O /dev/null \
                     --header "User-Agent: singbox/$sb_version" \
@@ -829,16 +833,17 @@ check_subscription_connectivity() {
             fi
         else
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -q -T "$timeout" -O /dev/null \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o /dev/null \
+                    "$url" 2>"$errfile"
             else
                 wget -q -T "$timeout" -O /dev/null \
                     --header "User-Agent: singbox/$sb_version" \
@@ -863,16 +868,17 @@ check_subscription_connectivity() {
         if [ "$family" != "ipv4" ] && has_ipv4_default_route && wget_supports_ipv4_flag; then
             family="ipv4"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
-                    wget -q -4 -T "$timeout" -O /dev/null \
-                        --header "User-Agent: singbox/$sb_version" \
-                        --header "X-HWID: $hwid" \
-                        --header "X-Device-OS: OpenWrt Linux" \
-                        --header "X-Device-Model: $device_model" \
-                        --header "X-Ver-OS: $kernel_version" \
-                        --header "Accept-Language: ru-RU,en,*" \
-                        --header "X-Device-Locale: EN" \
-                        "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" \
+                    -x "http://$http_proxy_address" \
+                    -H "User-Agent: singbox/$sb_version" \
+                    -H "X-HWID: $hwid" \
+                    -H "X-Device-OS: OpenWrt Linux" \
+                    -H "X-Device-Model: $device_model" \
+                    -H "X-Ver-OS: $kernel_version" \
+                    -H "Accept-Language: ru-RU,en,*" \
+                    -H "X-Device-Locale: EN" \
+                    -o /dev/null \
+                    "$url" 2>"$errfile"
             else
                 wget -q -4 -T "$timeout" -O /dev/null \
                     --header "User-Agent: singbox/$sb_version" \
