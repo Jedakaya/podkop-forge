@@ -468,12 +468,12 @@ download_to_file() {
         if should_force_wget_ipv4 "$url"; then
             family="ipv4"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" wget -4 -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" -x "http://$http_proxy_address" -o "$filepath" "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
             fi
         elif [ -n "$http_proxy_address" ]; then
-            http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" wget -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
+            curl -s -S --max-time "$timeout" -x "http://$http_proxy_address" -o "$filepath" "$url" 2>"$errfile"
         else
             wget -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
         fi
@@ -490,7 +490,7 @@ download_to_file() {
             errfile="${filepath}.wget.err.$$"
             log "Retrying download over IPv4-only after generic wget failure" "warn"
             if [ -n "$http_proxy_address" ]; then
-                http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" wget -4 -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
+                curl -4 -s -S --max-time "$timeout" -x "http://$http_proxy_address" -o "$filepath" "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$filepath" "$url" 2>"$errfile"
             fi
