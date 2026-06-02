@@ -1156,9 +1156,20 @@ subscription_update() {
         fi
 
         if ! wait_for_subscription_connectivity "$section" "$subscription_url" "$service_proxy_address" 6 5 5; then
-            echolog "вќЊ Subscription source is not reachable for section '$section'"
-            failed_sections=$((failed_sections + 1))
-            return
+            if [ -n "$service_proxy_address" ]; then
+                log "Subscription connectivity via proxy failed for section '$section', retrying directly" "warn"
+                if ! wait_for_subscription_connectivity "$section" "$subscription_url" "" 1 0 10; then
+                    echolog "вќЊ Subscription source is not reachable for section '$section'"
+                    failed_sections=$((failed_sections + 1))
+                    return
+                fi
+                log "Direct connectivity check succeeded for section '$section'; downloading without proxy" "info"
+                service_proxy_address=""
+            else
+                echolog "вќЊ Subscription source is not reachable for section '$section'"
+                failed_sections=$((failed_sections + 1))
+                return
+            fi
         fi
 
         download_subscription_into_cache \
