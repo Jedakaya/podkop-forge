@@ -256,16 +256,6 @@ _add_outbound_transport() {
             sing_box_cm_set_grpc_transport_for_outbound "$config" "$outbound_tag" "$grpc_service_name"
         )
         ;;
-    xhttp)
-        local xhttp_path xhttp_host xhttp_mode
-        xhttp_path=$(url_get_query_param "$url" "path")
-        xhttp_host=$(url_get_query_param "$url" "host")
-        xhttp_mode=$(url_get_query_param "$url" "mode")
-
-        config=$(
-            sing_box_cm_set_xhttp_transport_for_outbound "$config" "$outbound_tag" "$xhttp_path" "$xhttp_host" "$xhttp_mode"
-        )
-        ;;
     *)
         log "Unknown transport '$transport' detected." "error"
         ;;

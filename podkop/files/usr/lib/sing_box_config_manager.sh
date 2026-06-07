@@ -818,47 +818,6 @@ sing_box_cm_set_ws_transport_for_outbound() {
 }
 
 #######################################
-# Set XHTTP transport settings for an outbound in a sing-box JSON configuration.
-# Arguments:
-#   config: string (JSON), sing-box configuration to modify
-#   tag: string, identifier of the outbound to modify
-#   path: string, request path (optional)
-#   host: string, HTTP Host header (optional)
-#   mode: string, XHTTP mode: "auto", "packet-up", "stream-up" or "stream-one" (optional)
-# Outputs:
-#   Writes updated JSON configuration to stdout
-# Example:
-#   CONFIG=$(sing_box_cm_set_xhttp_transport_for_outbound "$CONFIG" "vless-tls-xhttp-out" "/path" "example.com")
-#######################################
-sing_box_cm_set_xhttp_transport_for_outbound() {
-    local config="$1"
-    local tag="$2"
-    local path="$3"
-    local host="$4"
-    local mode="$5"
-
-    echo "$config" | jq \
-        --arg tag "$tag" \
-        --arg path "$path" \
-        --arg host "$host" \
-        --arg mode "$mode" \
-        '.outbounds |= map(
-            if .tag == $tag then
-                . + {
-                    transport: (
-                        { type: "xhttp" }
-                        + (if $path != "" then {path: $path} else {} end)
-                        + (if $host != "" then {host: $host} else {} end)
-                        + (if $mode != "" then {mode: $mode} else {} end)
-                    )
-                }
-            else
-                .
-            end
-        )'
-}
-
-#######################################
 # Set TLS settings for an outbound in a sing-box JSON configuration.
 # Arguments:
 #   config: string (JSON), sing-box configuration to modify
