@@ -433,7 +433,16 @@ function renderDiagnosticSystemInfoWidget() {
       };
     }
 
-    if (version !== `v${diagnosticsSystemInfo.podkop_latest_version}`) {
+    // Compiled version and the GitHub release tag may or may not carry a
+    // leading "v" depending on the build pipeline — strip it on both sides
+    // before comparing so the check doesn't depend on that convention.
+    const currentVersion = version.replace(/^v/i, '');
+    const latestVersion = diagnosticsSystemInfo.podkop_latest_version.replace(
+      /^v/i,
+      '',
+    );
+
+    if (currentVersion !== latestVersion) {
       logger.debug(
         '[DIAGNOSTIC]',
         'diagnosticsSystemInfo',

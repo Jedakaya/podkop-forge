@@ -4419,7 +4419,9 @@ function renderDiagnosticSystemInfoWidget() {
         value: version
       };
     }
-    if (version !== `v${diagnosticsSystemInfo.podkop_latest_version}`) {
+    const currentVersion = version.replace(/^v/i, "");
+    const latestVersion = diagnosticsSystemInfo.podkop_latest_version.replace(/^v/i, "");
+    if (currentVersion !== latestVersion) {
       logger.debug(
         "[DIAGNOSTIC]",
         "diagnosticsSystemInfo",
