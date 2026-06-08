@@ -291,20 +291,57 @@ check_system() {
     fi
 }
 
+offer_sing_box_extended() {
+    msg "В этом форке XHTTP-транспорт из подписок работает только на sing-box-extended"
+    msg "(сторонний форк sing-box с поддержкой XHTTP: https://github.com/shtorm-7/sing-box-extended)."
+    msg "Установить/обновить sing-box-extended сейчас? [Y/n]"
+
+    while true; do
+        read -r -p '' EXTENDED
+        case "$EXTENDED" in
+        "" | y | Y | yes | Yes | YES)
+            msg "Запускаю установщик sing-box-extended (github.com/EikeiDev/OpenWRT-sing-box-extended)..."
+            if wget -qO /tmp/sing-box-extended-install.sh "https://raw.githubusercontent.com/EikeiDev/OpenWRT-sing-box-extended/main/install.sh"; then
+                sh /tmp/sing-box-extended-install.sh
+                rm -f /tmp/sing-box-extended-install.sh
+            else
+                msg "Не удалось скачать установщик sing-box-extended. Поставьте вручную: https://github.com/EikeiDev/OpenWRT-sing-box-extended"
+            fi
+            break
+            ;;
+        n | N | no | No | NO)
+            msg "Пропускаем. Без sing-box-extended XHTTP из подписки будет недоступен (сервера будут пропускаться с warn в логе)."
+            break
+            ;;
+        *)
+            echo "Введите y или n"
+            ;;
+        esac
+    done
+}
+
 sing_box() {
-    if ! pkg_is_installed "^sing-box"; then
-        return
+    if pkg_is_installed "^sing-box"; then
+        sing_box_version=$(sing-box version | head -n 1 | awk '{print $3}')
+
+        case "$sing_box_version" in
+        *extended*)
+            msg "Обнаружен sing-box-extended ($sing_box_version, поддерживает XHTTP) — оставляем как есть."
+            return
+            ;;
+        esac
+
+        required_version="1.12.4"
+
+        if [ "$(printf '%s\n%s\n' "$sing_box_version" "$required_version" | sort -V | head -n 1)" != "$required_version" ]; then
+            msg "sing-box version $sing_box_version is older than the required version $required_version."
+            msg "Removing old version..."
+            service podkop stop
+            pkg_remove sing-box
+        fi
     fi
 
-    sing_box_version=$(sing-box version | head -n 1 | awk '{print $3}')
-    required_version="1.12.4"
-
-    if [ "$(printf '%s\n%s\n' "$sing_box_version" "$required_version" | sort -V | head -n 1)" != "$required_version" ]; then
-        msg "sing-box version $sing_box_version is older than the required version $required_version."
-        msg "Removing old version..."
-        service podkop stop
-        pkg_remove sing-box
-    fi
+    offer_sing_box_extended
 }
 
 main
