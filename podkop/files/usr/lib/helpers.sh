@@ -642,12 +642,14 @@ generate_hwid() {
 
 # Returns the User-Agent string to send when requesting a subscription.
 # Some providers (e.g. Remnawave) return a different subscription format
-# (and a different set of servers, including XHTTP) depending on the
-# User-Agent — clients like v2rayN/Happ get a base64 link list instead of
-# the sing-box JSON returned for "singbox/<version>", and that link list
-# can include XHTTP servers that the plain sing-box JSON omits.
+# (and a different set of servers, including XHTTP and Hysteria2) depending
+# on the User-Agent — clients like v2rayN get a base64 link list instead of
+# the sing-box JSON returned for "singbox/<version>" (with XHTTP servers the
+# plain sing-box JSON omits), while Happ-style User-Agents get a third format:
+# a JSON array of full per-server Xray client configs, the only one observed
+# to carry Hysteria2 servers at all.
 # This fork defaults to "v2rayN/9.99" for that reason (our subscription
-# parser understands both formats, see detect_subscription_format).
+# parser understands all three formats, see detect_subscription_format).
 # Honors the per-section "subscription_user_agent" UCI override:
 #   - unset/empty   -> "v2rayN/9.99" (this fork's default)
 #   - "singbox"     -> classic "singbox/<version>" (sentinel, resolved dynamically)
@@ -957,8 +959,23 @@ decode_subscription_link_list() {
         sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$'
 }
 
+# Recognizes the "Happ-format" subscription: a JSON array where each element is
+# a complete Xray-core client config (own dns/routing/inbounds/outbounds and a
+# "remarks" display name). Some panels (e.g. Remnawave) only return this format
+# - and only include Hysteria2 servers in it - for Happ-style User-Agents; the
+# sing-box-json and link-list formats above never carry Hysteria2 from such
+# panels. See _sing_box_cf_add_subscription_outbounds_from_xray_config_list.
+is_xray_config_list_subscription() {
+    local filepath="$1"
+
+    jq -e '
+        type == "array" and length > 0 and
+        (.[0] | type == "object" and (.outbounds | type == "array") and (.remarks | type == "string"))
+    ' "$filepath" > /dev/null 2>&1
+}
+
 # Detects the subscription file format.
-# Outputs one of: "sing-box-json", "link-list", "unknown"
+# Outputs one of: "sing-box-json", "xray-config-list", "link-list", "unknown"
 detect_subscription_format() {
     local filepath="$1"
 
@@ -966,6 +983,11 @@ detect_subscription_format() {
 
     if jq -e 'type == "object" and (.outbounds | type == "array")' "$filepath" > /dev/null 2>&1; then
         echo "sing-box-json"
+        return 0
+    fi
+
+    if is_xray_config_list_subscription "$filepath"; then
+        echo "xray-config-list"
         return 0
     fi
 
@@ -983,6 +1005,17 @@ count_usable_subscription_links() {
     local filepath="$1"
 
     decode_subscription_link_list "$filepath" | grep -cE "$SUBSCRIPTION_LINK_SCHEME_REGEX"
+}
+
+# Counts servers in a "Happ-format" (xray-config-list) subscription whose proxy
+# outbound uses a protocol that _sing_box_cf_convert_xray_outbound_to_sing_box
+# knows how to convert (currently: vless, hysteria/hysteria2).
+count_usable_xray_config_list_outbounds() {
+    local filepath="$1"
+
+    jq -r '[
+        .[] | select(any(.outbounds[]?; .protocol == "vless" or .protocol == "hysteria"))
+    ] | length' "$filepath" 2>/dev/null
 }
 
 validate_subscription_file() {
@@ -1003,6 +1036,9 @@ validate_subscription_file() {
                 .type != "block"
             )] | length > 0)
         ' "$filepath" > /dev/null 2>&1
+        ;;
+    xray-config-list)
+        [ "$(count_usable_xray_config_list_outbounds "$filepath")" -gt 0 ]
         ;;
     link-list)
         [ "$(count_usable_subscription_links "$filepath")" -gt 0 ]
@@ -1028,6 +1064,13 @@ describe_subscription_validation_failure() {
             return 0
         fi
         echo "downloaded file is not valid JSON and not a recognizable base64 link list"
+        return 0
+    fi
+
+    if is_xray_config_list_subscription "$filepath"; then
+        total="$(jq -r '[.[] | .outbounds[]?] | length' "$filepath" 2>/dev/null)"
+        usable="$(count_usable_xray_config_list_outbounds "$filepath")"
+        echo "subscription is a Happ-style server list with no usable proxy outbounds (supported protocols: vless, hysteria/hysteria2): total=${total:-unknown}, usable=${usable:-unknown}"
         return 0
     fi
 

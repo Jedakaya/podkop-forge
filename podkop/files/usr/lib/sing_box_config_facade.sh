@@ -396,6 +396,9 @@ sing_box_cf_add_subscription_outbounds() {
     link-list)
         _sing_box_cf_add_subscription_outbounds_from_link_list "$config" "$section" "$subscription_path"
         ;;
+    xray-config-list)
+        _sing_box_cf_add_subscription_outbounds_from_xray_config_list "$config" "$section" "$subscription_path"
+        ;;
     *)
         _sing_box_cf_add_subscription_outbounds_from_json "$config" "$section" "$subscription_path"
         ;;
@@ -538,6 +541,278 @@ _sing_box_cf_add_subscription_outbounds_from_json() {
 
     log "Added $added_count subscription outbounds for section '$section'" "info"
     SING_BOX_CF_LAST_CONFIG="$config"
+
+    echo "$config"
+}
+
+#######################################
+# Parse a "Happ-format" subscription - a JSON array where each element is a
+# complete Xray-core client config with its own "outbounds" array and a
+# "remarks" display name (see is_xray_config_list_subscription) - and add the
+# proxy outbound from each entry to the configuration. This is the only known
+# format in which some panels (e.g. Remnawave) include Hysteria2 servers; their
+# sing-box-json and link-list subscription variants omit Hysteria2 entirely,
+# regardless of which User-Agent is used to fetch them.
+# Uses each entry's "remarks" as the outbound tag/display name, falling back
+# to "server-<n>" when missing.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   section: string, the UCI section name
+#   subscription_path: string, path to the downloaded subscription file
+# Outputs:
+#   Writes updated JSON configuration to stdout
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS (comma-separated list of tags)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS_JSON (JSON array of tags, ASCII-escaped)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_NAMES (newline-separated list of display names)
+#######################################
+_sing_box_cf_add_subscription_outbounds_from_xray_config_list() {
+    local config="$1"
+    local section="$2"
+    local subscription_path="$3"
+
+    local entries_count
+    entries_count=$(jq -r '. | length' "$subscription_path" 2>/dev/null)
+
+    if [ -z "$entries_count" ] || [ "$entries_count" -eq 0 ]; then
+        log "No server entries found in subscription server list" "error"
+        echo "$config"
+        return 1
+    fi
+
+    log "Found $entries_count server entries in subscription server list" "info"
+
+    local i=0
+    local added_count=0
+    local entry_json display_name proxy_outbound_json base_tag outbound_tag tag_suffix updated_config validation_tmp
+
+    while [ "$i" -lt "$entries_count" ]; do
+        entry_json=$(jq -c ".[$i]" "$subscription_path" 2>/dev/null)
+        i=$((i + 1))
+
+        [ -n "$entry_json" ] && [ "$entry_json" != "null" ] || continue
+
+        # Each entry carries a full Xray client config (own inbounds/outbounds);
+        # pick the first proxy outbound we know how to convert and ignore the
+        # rest (typically "direct"/"block" helper outbounds).
+        proxy_outbound_json=$(printf '%s' "$entry_json" |
+            jq -c '[.outbounds[]? | select(.protocol == "vless" or .protocol == "hysteria")][0] // empty' 2>/dev/null)
+
+        display_name=$(printf '%s' "$entry_json" | jq -r ".remarks // \"server-$i\"" 2>/dev/null)
+        [ -n "$display_name" ] && [ "$display_name" != "null" ] || display_name="server-$i"
+
+        if [ -z "$proxy_outbound_json" ]; then
+            log "Skip subscription server with no supported proxy outbound: '$display_name'" "warn"
+            continue
+        fi
+
+        base_tag="$display_name"
+        outbound_tag="$base_tag"
+        tag_suffix=1
+        while printf '%s' "$config" | jq -e --arg tag "$outbound_tag" '.outbounds[]? | select(.tag == $tag)' > /dev/null 2>&1; do
+            outbound_tag="${base_tag}-$tag_suffix"
+            tag_suffix=$((tag_suffix + 1))
+        done
+
+        updated_config=$(_sing_box_cf_convert_xray_outbound_to_sing_box "$config" "$outbound_tag" "$proxy_outbound_json" 2>/dev/null)
+        if [ -z "$updated_config" ]; then
+            log "Skip unsupported subscription server: '$display_name'" "warn"
+            continue
+        fi
+
+        # Validate against current sing-box capabilities (e.g. XHTTP transport
+        # requires sing-box-extended) and skip outbounds it cannot run - the
+        # same safety net used for the other subscription formats.
+        validation_tmp="$(mktemp)"
+        sing_box_cm_save_config_to_file "$updated_config" "$validation_tmp"
+        if ! sing-box -c "$validation_tmp" check > /dev/null 2>&1; then
+            rm -f "$validation_tmp"
+            log "Skip unsupported subscription server for current sing-box: '$display_name'" "warn"
+            continue
+        fi
+        rm -f "$validation_tmp"
+
+        config="$updated_config"
+
+        if [ -z "$SUBSCRIPTION_OUTBOUND_TAGS" ]; then
+            SUBSCRIPTION_OUTBOUND_TAGS="$outbound_tag"
+        else
+            SUBSCRIPTION_OUTBOUND_TAGS="$SUBSCRIPTION_OUTBOUND_TAGS,$outbound_tag"
+        fi
+
+        # Keep a JSON representation to avoid Unicode corruption in shell string processing.
+        SUBSCRIPTION_OUTBOUND_TAGS_JSON=$(
+            printf '%s' "$SUBSCRIPTION_OUTBOUND_TAGS_JSON" | jq -ac --arg tag "$outbound_tag" '. + [$tag]' 2>/dev/null
+        )
+        if [ -z "$SUBSCRIPTION_OUTBOUND_TAGS_JSON" ]; then
+            SUBSCRIPTION_OUTBOUND_TAGS_JSON="[]"
+        fi
+
+        if [ -z "$SUBSCRIPTION_OUTBOUND_NAMES" ]; then
+            SUBSCRIPTION_OUTBOUND_NAMES="$display_name"
+        else
+            SUBSCRIPTION_OUTBOUND_NAMES="$(printf '%s\n%s' "$SUBSCRIPTION_OUTBOUND_NAMES" "$display_name")"
+        fi
+
+        added_count=$((added_count + 1))
+    done
+
+    log "Added $added_count subscription outbounds for section '$section'" "info"
+    SING_BOX_CF_LAST_CONFIG="$config"
+
+    echo "$config"
+}
+
+#######################################
+# Converts a single Xray-core proxy outbound (as found inside a "Happ-format"
+# subscription entry, see _sing_box_cf_add_subscription_outbounds_from_xray_config_list)
+# into a sing-box outbound identified by $tag and appends it to $config.
+# Supports:
+#   - vless over tcp/raw/ws/grpc/xhttp, with reality or tls security
+#   - hysteria v2 -> sing-box hysteria2 (other versions are not supported by sing-box)
+# Outputs the updated config and returns 0 on success; outputs nothing and
+# returns 1 for unsupported protocols/transports or malformed entries, so the
+# caller can skip the server the same way it skips invalid links/outbounds from
+# the other subscription formats.
+#######################################
+_sing_box_cf_convert_xray_outbound_to_sing_box() {
+    local config="$1"
+    local tag="$2"
+    local outbound_json="$3"
+
+    local protocol
+    protocol=$(printf '%s' "$outbound_json" | jq -r '.protocol // ""' 2>/dev/null)
+
+    case "$protocol" in
+    vless)
+        local address port uuid flow network
+        address=$(printf '%s' "$outbound_json" | jq -r '.settings.vnext[0].address // ""' 2>/dev/null)
+        port=$(printf '%s' "$outbound_json" | jq -r '.settings.vnext[0].port // ""' 2>/dev/null)
+        uuid=$(printf '%s' "$outbound_json" | jq -r '.settings.vnext[0].users[0].id // ""' 2>/dev/null)
+        flow=$(printf '%s' "$outbound_json" | jq -r '.settings.vnext[0].users[0].flow // ""' 2>/dev/null)
+        network=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.network // ""' 2>/dev/null)
+
+        [ -n "$address" ] && [ -n "$port" ] && [ -n "$uuid" ] || return 1
+
+        case "$network" in
+        tcp | raw | "" | ws | grpc | xhttp) ;;
+        *)
+            log "Skip vless outbound '$tag' with unsupported transport '$network'" "warn"
+            return 1
+            ;;
+        esac
+
+        config=$(sing_box_cm_add_vless_outbound "$config" "$tag" "$address" "$port" "$uuid" "$flow" "" "")
+        config=$(_xray_set_outbound_security_for_outbound "$config" "$tag" "$outbound_json")
+        config=$(_xray_set_outbound_transport_for_outbound "$config" "$tag" "$outbound_json")
+        ;;
+    hysteria)
+        local version address port auth sni alpn
+        version=$(printf '%s' "$outbound_json" | jq -r '.settings.version // .streamSettings.hysteriaSettings.version // ""' 2>/dev/null)
+        if [ "$version" != "2" ]; then
+            log "Skip Hysteria outbound '$tag': only Hysteria2 (version 2) is supported" "warn"
+            return 1
+        fi
+
+        address=$(printf '%s' "$outbound_json" | jq -r '.settings.address // ""' 2>/dev/null)
+        port=$(printf '%s' "$outbound_json" | jq -r '.settings.port // ""' 2>/dev/null)
+        auth=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.hysteriaSettings.auth // ""' 2>/dev/null)
+
+        [ -n "$address" ] && [ -n "$port" ] && [ -n "$auth" ] || return 1
+
+        config=$(sing_box_cm_add_hysteria2_outbound "$config" "$tag" "$address" "$port" "$auth" "" "" "" "")
+
+        # Deliberately NOT propagating streamSettings.tlsSettings.fingerprint
+        # here. sing-box-extended (and presumably mainline) rejects a Hysteria2
+        # (QUIC) outbound configured with a uTLS fingerprint - "unsupported
+        # usage for uTLS" - confirmed live on-router: the connection fails
+        # before a single packet reaches the server. uTLS fingerprinting
+        # emulates a TCP+TLS ClientHello; QUIC has its own TLS 1.3 stack and
+        # gains nothing from it.
+        sni=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.tlsSettings.serverName // ""' 2>/dev/null)
+        alpn=$(printf '%s' "$outbound_json" | jq -c '.streamSettings.tlsSettings.alpn // null' 2>/dev/null)
+        config=$(sing_box_cm_set_tls_for_outbound "$config" "$tag" "$sni" "" "$alpn" "" "" "")
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    echo "$config"
+}
+
+_xray_set_outbound_security_for_outbound() {
+    local config="$1"
+    local tag="$2"
+    local outbound_json="$3"
+
+    local security
+    security=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.security // ""' 2>/dev/null)
+
+    case "$security" in
+    reality)
+        local sni fingerprint public_key short_id
+        sni=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.realitySettings.serverName // ""' 2>/dev/null)
+        fingerprint=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.realitySettings.fingerprint // ""' 2>/dev/null)
+        public_key=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.realitySettings.publicKey // ""' 2>/dev/null)
+        short_id=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.realitySettings.shortId // ""' 2>/dev/null)
+
+        config=$(sing_box_cm_set_tls_for_outbound "$config" "$tag" "$sni" "" "null" "$fingerprint" "$public_key" "$short_id")
+        ;;
+    tls)
+        local sni fingerprint alpn insecure
+        sni=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.tlsSettings.serverName // ""' 2>/dev/null)
+        fingerprint=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.tlsSettings.fingerprint // ""' 2>/dev/null)
+        alpn=$(printf '%s' "$outbound_json" | jq -c '.streamSettings.tlsSettings.alpn // null' 2>/dev/null)
+        insecure=$(printf '%s' "$outbound_json" | jq -r 'if .streamSettings.tlsSettings.allowInsecure == true then "1" else "" end' 2>/dev/null)
+
+        config=$(sing_box_cm_set_tls_for_outbound "$config" "$tag" "$sni" "$([ "$insecure" = "1" ] && echo true)" "$alpn" "$fingerprint" "" "")
+        ;;
+    none | "") ;;
+    *)
+        log "Unknown security '$security' in subscription outbound '$tag'" "warn"
+        ;;
+    esac
+
+    echo "$config"
+}
+
+_xray_set_outbound_transport_for_outbound() {
+    local config="$1"
+    local tag="$2"
+    local outbound_json="$3"
+
+    local network
+    network=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.network // ""' 2>/dev/null)
+
+    case "$network" in
+    tcp | raw | "") ;;
+    ws)
+        local ws_path ws_host
+        ws_path=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.wsSettings.path // ""' 2>/dev/null)
+        ws_host=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.wsSettings.host // ""' 2>/dev/null)
+
+        config=$(sing_box_cm_set_ws_transport_for_outbound "$config" "$tag" "$ws_path" "$ws_host" "")
+        ;;
+    grpc)
+        local grpc_service_name
+        grpc_service_name=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.grpcSettings.serviceName // ""' 2>/dev/null)
+
+        config=$(sing_box_cm_set_grpc_transport_for_outbound "$config" "$tag" "$grpc_service_name")
+        ;;
+    xhttp)
+        # Mainline sing-box doesn't know this transport - only the third-party
+        # sing-box-extended fork does. We still build the outbound; the caller
+        # runs it through `sing-box check` and silently drops it when the
+        # running build can't use it (same as for link-list subscriptions).
+        local xhttp_path xhttp_host xhttp_mode xhttp_extra
+        xhttp_path=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.xhttpSettings.path // ""' 2>/dev/null)
+        xhttp_host=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.xhttpSettings.host // ""' 2>/dev/null)
+        xhttp_mode=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.xhttpSettings.mode // ""' 2>/dev/null)
+        xhttp_extra=$(printf '%s' "$outbound_json" | jq -c '.streamSettings.xhttpSettings.extra // null' 2>/dev/null)
+
+        config=$(sing_box_cm_set_xhttp_transport_for_outbound "$config" "$tag" "$xhttp_path" "$xhttp_host" "$xhttp_mode" "$xhttp_extra")
+        ;;
+    esac
 
     echo "$config"
 }
