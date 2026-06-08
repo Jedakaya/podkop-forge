@@ -323,7 +323,7 @@ wait_for_subscription_connectivity() {
     local attempt
 
     for attempt in $(seq 1 "$attempts"); do
-        if check_subscription_connectivity "$subscription_url" "$service_proxy_address" 1 0 "$timeout"; then
+        if check_subscription_connectivity "$subscription_url" "$service_proxy_address" 1 0 "$timeout" "$section"; then
             log "Subscription connectivity check passed for section '$section'" "info"
             return 0
         fi
@@ -357,7 +357,7 @@ download_subscription_into_cache() {
         return 11
     }
 
-    if ! download_subscription "$subscription_url" "$tmpfile" "$service_proxy_address" 3 2 10; then
+    if ! download_subscription "$subscription_url" "$tmpfile" "$service_proxy_address" 3 2 10 "$section"; then
         log "Subscription body download failed for section '$section' after retries" "error"
         rm -f "$tmpfile"
         return 12

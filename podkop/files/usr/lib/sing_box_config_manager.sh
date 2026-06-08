@@ -818,6 +818,76 @@ sing_box_cm_set_ws_transport_for_outbound() {
 }
 
 #######################################
+# Set XHTTP transport settings for an outbound in a sing-box JSON configuration.
+# Mainline sing-box does not support XHTTP ("unknown transport type: xhttp") -
+# only the third-party sing-box-extended fork does, with its own field schema
+# (snake_case, no "extra" wrapper: transport.xmux.max_reuse_times,
+# transport.x_padding_bytes, ...) instead of the camelCase Xray-style
+# "extra": {"xmux": {"cMaxReuseTimes": ...}, "xPaddingBytes": ...} found in
+# subscription links. This function converts the latter into the former.
+# The caller is expected to validate the resulting outbound with
+# `sing-box check` and discard it when XHTTP isn't supported by the running build.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   tag: string, identifier of the outbound to modify
+#   path: string, request path (optional)
+#   host: string, HTTP Host header (optional)
+#   mode: string, XHTTP mode: "auto", "packet-up", "stream-up" or "stream-one" (optional)
+#   extra_json: string (JSON object), Xray-style "extra" object - {"xmux": {...}, "xPaddingBytes": "..."} (optional)
+# Outputs:
+#   Writes updated JSON configuration to stdout
+# Example:
+#   CONFIG=$(sing_box_cm_set_xhttp_transport_for_outbound "$CONFIG" "vless-reality-xhttp-out" "/" "" "auto" "$extra_json")
+#######################################
+sing_box_cm_set_xhttp_transport_for_outbound() {
+    local config="$1"
+    local tag="$2"
+    local path="$3"
+    local host="$4"
+    local mode="$5"
+    local extra_json="$6"
+
+    local x_padding_bytes="" xmux_json="{}"
+    if [ -n "$extra_json" ] && [ "$extra_json" != "null" ]; then
+        x_padding_bytes=$(printf '%s' "$extra_json" | jq -r 'if .xPaddingBytes != null then .xPaddingBytes else "" end' 2>/dev/null)
+
+        xmux_json=$(printf '%s' "$extra_json" | jq -c '
+            (.xmux // {}) as $x | {}
+                + (if $x.cMaxReuseTimes != null then {max_reuse_times: $x.cMaxReuseTimes} else {} end)
+                + (if $x.maxConcurrency != null then {max_concurrency: $x.maxConcurrency} else {} end)
+                + (if $x.hKeepAlivePeriod != null then {h_keep_alive_period: $x.hKeepAlivePeriod} else {} end)
+                + (if $x.hMaxRequestTimes != null then {max_request_times: $x.hMaxRequestTimes} else {} end)
+                + (if $x.hMaxReusableSecs != null then {max_reusable_secs: $x.hMaxReusableSecs} else {} end)
+        ' 2>/dev/null)
+        { [ -n "$xmux_json" ] && [ "$xmux_json" != "null" ]; } || xmux_json="{}"
+    fi
+
+    echo "$config" | jq \
+        --arg tag "$tag" \
+        --arg path "$path" \
+        --arg host "$host" \
+        --arg mode "$mode" \
+        --arg x_padding_bytes "$x_padding_bytes" \
+        --argjson xmux "$xmux_json" \
+        '.outbounds |= map(
+            if .tag == $tag then
+                . + {
+                    transport: (
+                        { type: "xhttp" }
+                        + (if $path != "" then {path: $path} else {} end)
+                        + (if $host != "" then {host: $host} else {} end)
+                        + (if $mode != "" then {mode: $mode} else {} end)
+                        + (if $x_padding_bytes != "" then {x_padding_bytes: $x_padding_bytes} else {} end)
+                        + (if ($xmux | length) > 0 then {xmux: $xmux} else {} end)
+                    )
+                }
+            else
+                .
+            end
+        )'
+}
+
+#######################################
 # Set TLS settings for an outbound in a sing-box JSON configuration.
 # Arguments:
 #   config: string (JSON), sing-box configuration to modify

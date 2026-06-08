@@ -61,6 +61,24 @@ sing_box_cf_add_proxy_outbound() {
     local url="$3"
     local udp_over_tcp="$4"
 
+    local tag
+    tag=$(get_outbound_tag_by_section "$section")
+
+    sing_box_cf_add_proxy_outbound_with_tag "$config" "$tag" "$url" "$udp_over_tcp"
+}
+
+#######################################
+# Same as sing_box_cf_add_proxy_outbound, but takes an explicit outbound tag
+# instead of deriving it from a section name. Used for sources that contain
+# multiple links needing distinct tags (e.g. subscription link lists), where
+# get_outbound_tag_by_section's fixed "<section>-out" naming would collide.
+#######################################
+sing_box_cf_add_proxy_outbound_with_tag() {
+    local config="$1"
+    local tag="$2"
+    local url="$3"
+    local udp_over_tcp="$4"
+
     url=$(url_decode "$url")
     url=$(url_strip_fragment "$url")
 
@@ -68,9 +86,8 @@ sing_box_cf_add_proxy_outbound() {
     scheme="$(url_get_scheme "$url")"
     case "$scheme" in
     socks4 | socks4a | socks5)
-        local tag host port version userinfo username password udp_over_tcp
+        local host port version userinfo username password
 
-        tag=$(get_outbound_tag_by_section "$section")
         host=$(url_get_host "$url")
         port=$(url_get_port "$url")
         version="${scheme#socks}"
@@ -94,8 +111,7 @@ sing_box_cf_add_proxy_outbound() {
         )"
         ;;
     vless)
-        local tag host port uuid flow packet_encoding
-        tag=$(get_outbound_tag_by_section "$section")
+        local host port uuid flow packet_encoding
         host=$(url_get_host "$url")
         port=$(url_get_port "$url")
         uuid=$(url_get_userinfo "$url")
@@ -107,7 +123,7 @@ sing_box_cf_add_proxy_outbound() {
         config=$(_add_outbound_transport "$config" "$tag" "$url")
         ;;
     ss)
-        local userinfo tag host port method password udp_over_tcp
+        local userinfo host port method password
 
         userinfo=$(url_get_userinfo "$url")
         if ! is_shadowsocks_userinfo_format "$userinfo"; then
@@ -118,7 +134,6 @@ sing_box_cf_add_proxy_outbound() {
             fi
         fi
 
-        tag=$(get_outbound_tag_by_section "$section")
         host=$(url_get_host "$url")
         port=$(url_get_port "$url")
         method="${userinfo%%:*}"
@@ -137,8 +152,7 @@ sing_box_cf_add_proxy_outbound() {
         )
         ;;
     trojan)
-        local tag host port password
-        tag=$(get_outbound_tag_by_section "$section")
+        local host port password
         host=$(url_get_host "$url")
         port=$(url_get_port "$url")
         password=$(url_get_userinfo "$url")
@@ -148,8 +162,7 @@ sing_box_cf_add_proxy_outbound() {
         config=$(_add_outbound_transport "$config" "$tag" "$url")
         ;;
     hysteria2 | hy2)
-        local tag host port password obfuscator_type obfuscator_password upload_mbps download_mbps
-        tag=$(get_outbound_tag_by_section "$section")
+        local host port password obfuscator_type obfuscator_password upload_mbps download_mbps
         host=$(url_get_host "$url")
         port="$(url_get_port "$url")"
         password=$(url_get_userinfo "$url")
@@ -256,6 +269,22 @@ _add_outbound_transport() {
             sing_box_cm_set_grpc_transport_for_outbound "$config" "$outbound_tag" "$grpc_service_name"
         )
         ;;
+    xhttp)
+        # Mainline sing-box doesn't know this transport ("unknown transport
+        # type: xhttp") - only the third-party sing-box-extended fork does.
+        # We still build the outbound; callers that add it via a subscription
+        # (sing_box_cf_add_subscription_outbounds) run it through `sing-box
+        # check` and silently drop it when the running build can't use it.
+        local xhttp_path xhttp_host xhttp_mode xhttp_extra
+        xhttp_path=$(url_get_query_param "$url" "path")
+        xhttp_host=$(url_get_query_param "$url" "host")
+        xhttp_mode=$(url_get_query_param "$url" "mode")
+        xhttp_extra=$(url_get_query_param "$url" "extra")
+
+        config=$(
+            sing_box_cm_set_xhttp_transport_for_outbound "$config" "$outbound_tag" "$xhttp_path" "$xhttp_host" "$xhttp_mode" "$xhttp_extra"
+        )
+        ;;
     *)
         log "Unknown transport '$transport' detected." "error"
         ;;
@@ -330,6 +359,50 @@ sing_box_cf_add_single_key_reject_rule() {
 }
 
 #######################################
+# Parse a downloaded subscription file and add all usable proxy outbounds to
+# the configuration. Auto-detects the subscription format (see
+# detect_subscription_format) and dispatches to the matching parser:
+#   sing-box-json - a sing-box config with an "outbounds" array (default/legacy format)
+#   link-list     - a base64 blob of newline-separated proxy URLs, returned by
+#                   some providers (e.g. Remnawave) for v2rayN-like User-Agents,
+#                   and the only way to reach servers using XHTTP transport
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   section: string, the UCI section name
+#   subscription_path: string, path to the downloaded subscription file
+# Outputs:
+#   Writes updated JSON configuration to stdout
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS (comma-separated list of tags)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS_JSON (JSON array of tags, ASCII-escaped)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_NAMES (newline-separated list of display names)
+#######################################
+sing_box_cf_add_subscription_outbounds() {
+    local config="$1"
+    local section="$2"
+    local subscription_path="$3"
+
+    SUBSCRIPTION_OUTBOUND_TAGS=""
+    SUBSCRIPTION_OUTBOUND_TAGS_JSON="[]"
+    SUBSCRIPTION_OUTBOUND_NAMES=""
+    SING_BOX_CF_LAST_CONFIG="$config"
+
+    if [ ! -f "$subscription_path" ]; then
+        log "Subscription file not found: $subscription_path" "error"
+        echo "$config"
+        return 1
+    fi
+
+    case "$(detect_subscription_format "$subscription_path")" in
+    link-list)
+        _sing_box_cf_add_subscription_outbounds_from_link_list "$config" "$section" "$subscription_path"
+        ;;
+    *)
+        _sing_box_cf_add_subscription_outbounds_from_json "$config" "$section" "$subscription_path"
+        ;;
+    esac
+}
+
+#######################################
 # Parse a sing-box subscription JSON and add all proxy outbounds to the configuration.
 # Filters out non-proxy types (selector, urltest, direct, dns, block).
 # Uses 'tag' field (or 'remark' if present) as display name for each outbound.
@@ -343,21 +416,10 @@ sing_box_cf_add_single_key_reject_rule() {
 #   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS_JSON (JSON array of tags, ASCII-escaped)
 #   Sets global variable SUBSCRIPTION_OUTBOUND_NAMES (newline-separated list of display names)
 #######################################
-sing_box_cf_add_subscription_outbounds() {
+_sing_box_cf_add_subscription_outbounds_from_json() {
     local config="$1"
     local section="$2"
     local subscription_json_path="$3"
-
-    SUBSCRIPTION_OUTBOUND_TAGS=""
-    SUBSCRIPTION_OUTBOUND_TAGS_JSON="[]"
-    SUBSCRIPTION_OUTBOUND_NAMES=""
-    SING_BOX_CF_LAST_CONFIG="$config"
-
-    if [ ! -f "$subscription_json_path" ]; then
-        log "Subscription JSON file not found: $subscription_json_path" "error"
-        echo "$config"
-        return 1
-    fi
 
     # Extract proxy outbounds from subscription JSON
     # Filter out non-proxy types: selector, urltest, direct, dns, block
@@ -473,6 +535,121 @@ sing_box_cf_add_subscription_outbounds() {
         added_count=$((added_count + 1))
         i=$((i + 1))
     done
+
+    log "Added $added_count subscription outbounds for section '$section'" "info"
+    SING_BOX_CF_LAST_CONFIG="$config"
+
+    echo "$config"
+}
+
+#######################################
+# Parse a base64 link-list subscription (newline-separated proxy URLs, e.g.
+# "vless://...#<percent-encoded display name>") and add all usable proxy
+# outbounds to the configuration. This is the format some providers (e.g.
+# Remnawave) return for v2rayN-like User-Agents - see get_subscription_user_agent -
+# and it's the only way to reach servers using XHTTP transport, since those
+# aren't included in the sing-box JSON variant of the same subscription.
+# Uses the link's fragment (display name) as the outbound tag, falling back
+# to "server-<n>" when a link has no fragment.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   section: string, the UCI section name
+#   subscription_link_list_path: string, path to the downloaded subscription file
+# Outputs:
+#   Writes updated JSON configuration to stdout
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS (comma-separated list of tags)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_TAGS_JSON (JSON array of tags, ASCII-escaped)
+#   Sets global variable SUBSCRIPTION_OUTBOUND_NAMES (newline-separated list of display names)
+#######################################
+_sing_box_cf_add_subscription_outbounds_from_link_list() {
+    local config="$1"
+    local section="$2"
+    local subscription_link_list_path="$3"
+
+    local links_count
+    links_count=$(count_usable_subscription_links "$subscription_link_list_path")
+
+    if [ -z "$links_count" ] || [ "$links_count" -eq 0 ]; then
+        log "No usable proxy links found in subscription link list" "error"
+        echo "$config"
+        return 1
+    fi
+
+    log "Found $links_count proxy links in subscription" "info"
+
+    local decoded_tmp
+    decoded_tmp="$(mktemp)"
+    decode_subscription_link_list "$subscription_link_list_path" > "$decoded_tmp"
+
+    local i=0
+    local added_count=0
+    local link fragment display_name base_tag outbound_tag tag_suffix updated_config validation_tmp
+
+    while IFS= read -r link; do
+        i=$((i + 1))
+
+        printf '%s\n' "$link" | grep -qE "$SUBSCRIPTION_LINK_SCHEME_REGEX" || continue
+
+        # The display name lives in the URL fragment (after '#'), percent-encoded UTF-8.
+        fragment="${link#*#}"
+        if [ "$fragment" != "$link" ] && [ -n "$fragment" ]; then
+            display_name="$(url_decode "$fragment")"
+        else
+            display_name=""
+        fi
+        [ -n "$display_name" ] || display_name="server-$i"
+
+        base_tag="$display_name"
+        outbound_tag="$base_tag"
+        tag_suffix=1
+        while printf '%s' "$config" | jq -e --arg tag "$outbound_tag" '.outbounds[]? | select(.tag == $tag)' > /dev/null 2>&1; do
+            outbound_tag="${base_tag}-$tag_suffix"
+            tag_suffix=$((tag_suffix + 1))
+        done
+
+        updated_config=$(sing_box_cf_add_proxy_outbound_with_tag "$config" "$outbound_tag" "$link" "0" 2>/dev/null)
+        if [ -z "$updated_config" ]; then
+            log "Skip invalid subscription link: '$display_name'" "warn"
+            continue
+        fi
+
+        # Validate against current sing-box capabilities (e.g. XHTTP transport
+        # requires sing-box-extended) and skip outbounds it cannot run - the
+        # same safety net used for the raw sing-box JSON subscription format.
+        validation_tmp="$(mktemp)"
+        sing_box_cm_save_config_to_file "$updated_config" "$validation_tmp"
+        if ! sing-box -c "$validation_tmp" check > /dev/null 2>&1; then
+            rm -f "$validation_tmp"
+            log "Skip unsupported subscription link for current sing-box: '$display_name'" "warn"
+            continue
+        fi
+        rm -f "$validation_tmp"
+
+        config="$updated_config"
+
+        if [ -z "$SUBSCRIPTION_OUTBOUND_TAGS" ]; then
+            SUBSCRIPTION_OUTBOUND_TAGS="$outbound_tag"
+        else
+            SUBSCRIPTION_OUTBOUND_TAGS="$SUBSCRIPTION_OUTBOUND_TAGS,$outbound_tag"
+        fi
+
+        # Keep a JSON representation to avoid Unicode corruption in shell string processing.
+        SUBSCRIPTION_OUTBOUND_TAGS_JSON=$(
+            printf '%s' "$SUBSCRIPTION_OUTBOUND_TAGS_JSON" | jq -ac --arg tag "$outbound_tag" '. + [$tag]' 2>/dev/null
+        )
+        if [ -z "$SUBSCRIPTION_OUTBOUND_TAGS_JSON" ]; then
+            SUBSCRIPTION_OUTBOUND_TAGS_JSON="[]"
+        fi
+
+        if [ -z "$SUBSCRIPTION_OUTBOUND_NAMES" ]; then
+            SUBSCRIPTION_OUTBOUND_NAMES="$display_name"
+        else
+            SUBSCRIPTION_OUTBOUND_NAMES="$(printf '%s\n%s' "$SUBSCRIPTION_OUTBOUND_NAMES" "$display_name")"
+        fi
+
+        added_count=$((added_count + 1))
+    done < "$decoded_tmp"
+    rm -f "$decoded_tmp"
 
     log "Added $added_count subscription outbounds for section '$section'" "info"
     SING_BOX_CF_LAST_CONFIG="$config"

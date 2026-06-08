@@ -107,6 +107,16 @@ function createSectionContent(section) {
   };
 
   o = section.option(
+    form.Value,
+    "subscription_user_agent",
+    _("Subscription User-Agent"),
+    _("Override the User-Agent sent when fetching the subscription. Some providers return different servers (and formats, e.g. XHTTP) for different clients — try 'v2rayN/9.99' if your provider supports it. Leave empty to use the default 'singbox/<version>'"),
+  );
+  o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
+  o.placeholder = "singbox/<version>";
+  o.rmempty = true;
+
+  o = section.option(
     form.ListValue,
     "subscription_update_interval",
     _("Subscription Update Interval"),

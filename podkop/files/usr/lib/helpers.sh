@@ -640,6 +640,26 @@ generate_hwid() {
         "$(echo "$raw_hash" | cut -c13-16)"
 }
 
+# Returns the User-Agent string to send when requesting a subscription.
+# Some providers (e.g. Remnawave) return a different subscription format
+# (and a different set of servers, including XHTTP) depending on the
+# User-Agent — clients like v2rayN/Happ get a base64 link list instead of
+# the sing-box JSON returned for "singbox/<version>".
+# Honors the per-section "subscription_user_agent" UCI override; falls back
+# to the historical default "singbox/<version>" when not set.
+get_subscription_user_agent() {
+    local section="$1"
+    local custom_ua=""
+
+    [ -n "$section" ] && config_get custom_ua "$section" "subscription_user_agent"
+
+    if [ -n "$custom_ua" ]; then
+        echo "$custom_ua"
+    else
+        echo "singbox/$(get_sing_box_version)"
+    fi
+}
+
 # Downloads a subscription JSON from the given URL with custom headers
 # Arguments:
 #   $1 - subscription URL
@@ -647,6 +667,8 @@ generate_hwid() {
 #   $3 - http proxy address (optional)
 #   $4 - retries (optional, default 3)
 #   $5 - wait between retries (optional, default 2)
+#   $6 - timeout (optional, default 10)
+#   $7 - section name, used to resolve the subscription_user_agent override (optional)
 download_subscription() {
     local url="$1"
     local filepath="$2"
@@ -654,9 +676,10 @@ download_subscription() {
     local retries="${4:-3}"
     local wait="${5:-2}"
     local timeout="${6:-10}"
+    local section="$7"
 
-    local sb_version device_model kernel_version hwid
-    sb_version="$(get_sing_box_version)"
+    local user_agent device_model kernel_version hwid
+    user_agent="$(get_subscription_user_agent "$section")"
     device_model="$(get_device_model)"
     kernel_version="$(get_kernel_version)"
     hwid="$(generate_hwid)"
@@ -673,7 +696,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 curl -4 -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -684,7 +707,7 @@ download_subscription() {
                     "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -697,7 +720,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 curl -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -708,7 +731,7 @@ download_subscription() {
                     "$url" 2>"$errfile"
             else
                 wget -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -743,7 +766,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 curl -4 -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -754,7 +777,7 @@ download_subscription() {
                     "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -794,9 +817,10 @@ check_subscription_connectivity() {
     local retries="${3:-3}"
     local wait="${4:-2}"
     local timeout="${5:-5}"
+    local section="$6"
 
-    local sb_version device_model kernel_version hwid
-    sb_version="$(get_sing_box_version)"
+    local user_agent device_model kernel_version hwid
+    user_agent="$(get_subscription_user_agent "$section")"
     device_model="$(get_device_model)"
     kernel_version="$(get_kernel_version)"
     hwid="$(generate_hwid)"
@@ -811,7 +835,7 @@ check_subscription_connectivity() {
             if [ -n "$http_proxy_address" ]; then
                 curl -4 -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -822,7 +846,7 @@ check_subscription_connectivity() {
                     "$url" 2>"$errfile"
             else
                 wget -q -4 -T "$timeout" -O /dev/null \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -835,7 +859,7 @@ check_subscription_connectivity() {
             if [ -n "$http_proxy_address" ]; then
                 curl -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -846,7 +870,7 @@ check_subscription_connectivity() {
                     "$url" 2>"$errfile"
             else
                 wget -q -T "$timeout" -O /dev/null \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -870,7 +894,7 @@ check_subscription_connectivity() {
             if [ -n "$http_proxy_address" ]; then
                 curl -4 -s -S --max-time "$timeout" \
                     -x "http://$http_proxy_address" \
-                    -H "User-Agent: singbox/$sb_version" \
+                    -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
                     -H "X-Device-OS: OpenWrt Linux" \
                     -H "X-Device-Model: $device_model" \
@@ -881,7 +905,7 @@ check_subscription_connectivity() {
                     "$url" 2>"$errfile"
             else
                 wget -q -4 -T "$timeout" -O /dev/null \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -905,22 +929,77 @@ check_subscription_connectivity() {
     return 1
 }
 
+# Regex matching the proxy URL schemes that sing_box_cf_add_proxy_outbound_with_tag
+# knows how to turn into outbounds. Used to recognize/validate the link-list
+# subscription format (a base64 blob containing one proxy URL per line) and to
+# tell it apart from plain noise.
+SUBSCRIPTION_LINK_SCHEME_REGEX='^(socks4a?|socks5|vless|ss|trojan|hysteria2|hy2)://'
+
+# Decodes a subscription file that holds a base64 blob of newline-separated
+# proxy links (the format some providers, e.g. Remnawave, return for
+# v2rayN-like User-Agents instead of a raw sing-box JSON config) and writes
+# one trimmed, non-empty line per link to stdout.
+decode_subscription_link_list() {
+    local filepath="$1"
+
+    tr -d '\r' < "$filepath" | tr -d '\n' | base64 -d 2>/dev/null | tr -d '\r' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$'
+}
+
+# Detects the subscription file format.
+# Outputs one of: "sing-box-json", "link-list", "unknown"
+detect_subscription_format() {
+    local filepath="$1"
+
+    [ -s "$filepath" ] || { echo "unknown"; return 0; }
+
+    if jq -e 'type == "object" and (.outbounds | type == "array")' "$filepath" > /dev/null 2>&1; then
+        echo "sing-box-json"
+        return 0
+    fi
+
+    if decode_subscription_link_list "$filepath" | grep -qE "$SUBSCRIPTION_LINK_SCHEME_REGEX"; then
+        echo "link-list"
+        return 0
+    fi
+
+    echo "unknown"
+}
+
+# Counts links in a link-list subscription file with a scheme that
+# sing_box_cf_add_proxy_outbound_with_tag can turn into an outbound.
+count_usable_subscription_links() {
+    local filepath="$1"
+
+    decode_subscription_link_list "$filepath" | grep -cE "$SUBSCRIPTION_LINK_SCHEME_REGEX"
+}
+
 validate_subscription_file() {
     local filepath="$1"
 
     [ -s "$filepath" ] || return 1
 
-    jq -e '
-        type == "object" and
-        (.outbounds | type == "array") and
-        ([.outbounds[] | select(
-            .type != "selector" and
-            .type != "urltest" and
-            .type != "direct" and
-            .type != "dns" and
-            .type != "block"
-        )] | length > 0)
-    ' "$filepath" > /dev/null 2>&1
+    case "$(detect_subscription_format "$filepath")" in
+    sing-box-json)
+        jq -e '
+            type == "object" and
+            (.outbounds | type == "array") and
+            ([.outbounds[] | select(
+                .type != "selector" and
+                .type != "urltest" and
+                .type != "direct" and
+                .type != "dns" and
+                .type != "block"
+            )] | length > 0)
+        ' "$filepath" > /dev/null 2>&1
+        ;;
+    link-list)
+        [ "$(count_usable_subscription_links "$filepath")" -gt 0 ]
+        ;;
+    *)
+        return 1
+        ;;
+    esac
 }
 
 describe_subscription_validation_failure() {
@@ -933,7 +1012,11 @@ describe_subscription_validation_failure() {
     fi
 
     if ! jq -e '.' "$filepath" >/dev/null 2>&1; then
-        echo "downloaded file is not valid JSON"
+        if [ -n "$(decode_subscription_link_list "$filepath")" ]; then
+            echo "subscription is a base64 link list with no usable proxy links (supported schemes: socks4/4a/5, vless, ss, trojan, hysteria2/hy2)"
+            return 0
+        fi
+        echo "downloaded file is not valid JSON and not a recognizable base64 link list"
         return 0
     fi
 
