@@ -860,6 +860,7 @@ async function getDashboardSections() {
           }));
           return {
             withTagSelect: true,
+            isSubscription: true,
             code: selector?.code || section[".name"] + "-out",
             displayName: section[".name"],
             outbounds: [
@@ -876,6 +877,7 @@ async function getDashboardSections() {
         }
         return {
           withTagSelect: true,
+          isSubscription: true,
           code: selector?.code || section[".name"] + "-out",
           displayName: section[".name"],
           outbounds
@@ -1458,6 +1460,7 @@ var initialStore = {
     loading: true,
     failed: false,
     latencyFetching: false,
+    subscriptionUpdating: false,
     data: []
   },
   ...initialDiagnosticStore
@@ -1816,7 +1819,9 @@ function renderDefaultState({
   section,
   onChooseOutbound,
   onTestLatency,
-  latencyFetching
+  onUpdateSubscription,
+  latencyFetching,
+  subscriptionUpdating
 }) {
   function testLatency() {
     if (section.withTagSelect) {
@@ -1872,14 +1877,27 @@ function renderDefaultState({
         },
         section.displayName
       ),
-      latencyFetching ? E("div", { class: "skeleton", style: "width: 99px; height: 28px" }) : E(
-        "button",
-        {
-          class: "btn dashboard-sections-grid-item-test-latency",
-          click: () => testLatency()
-        },
-        _("Test latency")
-      )
+      E("div", { style: "display: flex; gap: 8px" }, [
+        section.isSubscription ? subscriptionUpdating ? E("div", {
+          class: "skeleton",
+          style: "width: 99px; height: 28px"
+        }) : E(
+          "button",
+          {
+            class: "btn dashboard-sections-grid-item-update-subscription",
+            click: () => onUpdateSubscription()
+          },
+          _("Update subscription")
+        ) : "",
+        latencyFetching ? E("div", { class: "skeleton", style: "width: 99px; height: 28px" }) : E(
+          "button",
+          {
+            class: "btn dashboard-sections-grid-item-test-latency",
+            click: () => testLatency()
+          },
+          _("Test latency")
+        )
+      ])
     ]),
     E(
       "div",
@@ -2159,6 +2177,33 @@ async function handleChooseOutbound(selector, tag) {
   }
   await fetchDashboardSections();
 }
+async function handleUpdateSubscription() {
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      subscriptionUpdating: true
+    }
+  });
+  try {
+    const result = await PodkopShellMethods.subscriptionUpdate();
+    if (result.success) {
+      showToast(_("Subscription updated"), "success");
+    } else {
+      logger.error("[DASHBOARD]", "handleUpdateSubscription - e", result);
+      showToast(_("Failed to update subscription"), "error");
+    }
+  } catch (e) {
+    logger.error("[DASHBOARD]", "handleUpdateSubscription - e", e);
+    showToast(_("Failed to update subscription"), "error");
+  }
+  await fetchDashboardSections();
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      subscriptionUpdating: false
+    }
+  });
+}
 async function handleTestGroupLatency(tag) {
   store.set({
     sectionsWidget: {
@@ -2209,7 +2254,10 @@ async function renderSectionsWidget() {
       },
       onChooseOutbound: () => {
       },
-      latencyFetching: sectionsWidget.latencyFetching
+      onUpdateSubscription: () => {
+      },
+      latencyFetching: sectionsWidget.latencyFetching,
+      subscriptionUpdating: sectionsWidget.subscriptionUpdating
     });
     return preserveScrollForPage(() => {
       container.replaceChildren(renderedWidget);
@@ -2221,6 +2269,7 @@ async function renderSectionsWidget() {
       failed: sectionsWidget.failed,
       section,
       latencyFetching: sectionsWidget.latencyFetching,
+      subscriptionUpdating: sectionsWidget.subscriptionUpdating,
       onTestLatency: (tag) => {
         if (section.withTagSelect) {
           return handleTestGroupLatency(tag);
@@ -2229,6 +2278,9 @@ async function renderSectionsWidget() {
       },
       onChooseOutbound: (selector, tag) => {
         handleChooseOutbound(selector, tag);
+      },
+      onUpdateSubscription: () => {
+        handleUpdateSubscription();
       }
     })
   );

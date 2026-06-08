@@ -110,11 +110,14 @@ function createSectionContent(section) {
     form.Value,
     "subscription_user_agent",
     _("Subscription User-Agent"),
-    _("Override the User-Agent sent when fetching the subscription. Some providers return different servers (and formats, e.g. XHTTP) for different clients — try 'v2rayN/9.99' if your provider supports it. Leave empty to use the default 'singbox/<version>'"),
+    _("User-Agent sent when fetching the subscription. Many providers (e.g. Remnawave) return more servers and formats — including XHTTP — for 'v2rayN/9.99' than for the plain sing-box User-Agent, so this fork uses it by default. Pick 'singbox' to go back to the classic 'singbox/<version>', or enter a custom value."),
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
-  o.placeholder = "singbox/<version>";
+  o.placeholder = "v2rayN/9.99";
+  o.default = "v2rayN/9.99";
   o.rmempty = true;
+  o.value("v2rayN/9.99", _("v2rayN/9.99 (recommended — more servers, XHTTP support)"));
+  o.value("singbox", _("singbox/<version> (classic sing-box format)"));
 
   o = section.option(
     form.ListValue,

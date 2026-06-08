@@ -66,7 +66,7 @@ sh <(wget -O - https://raw.githubusercontent.com/Jedakaya/podkop-forge/refs/head
 - Ручное переключение между серверами через дашборд
 
 При скачивании подписки отправляются заголовки:
-- `User-Agent: singbox/<версия>`
+- `User-Agent: v2rayN/9.99` (по умолчанию для этого форка — многие провайдеры, включая Remnawave, под этим клиентом отдают больше серверов и форматов, в т.ч. XHTTP; переопределяется опцией `subscription_user_agent`, значение `singbox` вернёт классический `singbox/<версия>`)
 - `X-HWID` — уникальный идентификатор роутера
 - `X-Device-OS: OpenWrt Linux`
 - `X-Device-Model` — модель роутера

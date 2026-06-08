@@ -4,6 +4,7 @@ import {
   preserveScrollForPage,
 } from '../../../helpers';
 import { prettyBytes } from '../../../helpers/prettyBytes';
+import { showToast } from '../../../helpers/showToast';
 import { CustomPodkopMethods, PodkopShellMethods } from '../../methods';
 import { logger, socket, store, StoreType } from '../../services';
 import { renderSections, renderWidget } from './partials';
@@ -145,6 +146,38 @@ async function handleTestGroupLatency(tag: string) {
   });
 }
 
+async function handleUpdateSubscription() {
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      subscriptionUpdating: true,
+    },
+  });
+
+  try {
+    const result = await PodkopShellMethods.subscriptionUpdate();
+
+    if (result.success) {
+      showToast(_('Subscription updated'), 'success');
+    } else {
+      logger.error('[DASHBOARD]', 'handleUpdateSubscription - e', result);
+      showToast(_('Failed to update subscription'), 'error');
+    }
+  } catch (e) {
+    logger.error('[DASHBOARD]', 'handleUpdateSubscription - e', e);
+    showToast(_('Failed to update subscription'), 'error');
+  }
+
+  await fetchDashboardSections();
+
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      subscriptionUpdating: false,
+    },
+  });
+}
+
 async function handleTestProxyLatency(tag: string) {
   store.set({
     sectionsWidget: {
@@ -183,7 +216,9 @@ async function renderSectionsWidget() {
       },
       onTestLatency: () => {},
       onChooseOutbound: () => {},
+      onUpdateSubscription: () => {},
       latencyFetching: sectionsWidget.latencyFetching,
+      subscriptionUpdating: sectionsWidget.subscriptionUpdating,
     });
 
     return preserveScrollForPage(() => {
@@ -197,6 +232,7 @@ async function renderSectionsWidget() {
       failed: sectionsWidget.failed,
       section,
       latencyFetching: sectionsWidget.latencyFetching,
+      subscriptionUpdating: sectionsWidget.subscriptionUpdating,
       onTestLatency: (tag) => {
         if (section.withTagSelect) {
           return handleTestGroupLatency(tag);
@@ -206,6 +242,9 @@ async function renderSectionsWidget() {
       },
       onChooseOutbound: (selector, tag) => {
         handleChooseOutbound(selector, tag);
+      },
+      onUpdateSubscription: () => {
+        handleUpdateSubscription();
       },
     }),
   );

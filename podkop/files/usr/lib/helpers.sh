@@ -644,20 +644,31 @@ generate_hwid() {
 # Some providers (e.g. Remnawave) return a different subscription format
 # (and a different set of servers, including XHTTP) depending on the
 # User-Agent — clients like v2rayN/Happ get a base64 link list instead of
-# the sing-box JSON returned for "singbox/<version>".
-# Honors the per-section "subscription_user_agent" UCI override; falls back
-# to the historical default "singbox/<version>" when not set.
+# the sing-box JSON returned for "singbox/<version>", and that link list
+# can include XHTTP servers that the plain sing-box JSON omits.
+# This fork defaults to "v2rayN/9.99" for that reason (our subscription
+# parser understands both formats, see detect_subscription_format).
+# Honors the per-section "subscription_user_agent" UCI override:
+#   - unset/empty   -> "v2rayN/9.99" (this fork's default)
+#   - "singbox"     -> classic "singbox/<version>" (sentinel, resolved dynamically)
+#   - anything else -> sent as-is
 get_subscription_user_agent() {
     local section="$1"
     local custom_ua=""
 
     [ -n "$section" ] && config_get custom_ua "$section" "subscription_user_agent"
 
-    if [ -n "$custom_ua" ]; then
-        echo "$custom_ua"
-    else
+    case "$custom_ua" in
+    "")
+        echo "v2rayN/9.99"
+        ;;
+    "singbox")
         echo "singbox/$(get_sing_box_version)"
-    fi
+        ;;
+    *)
+        echo "$custom_ua"
+        ;;
+    esac
 }
 
 # Downloads a subscription JSON from the given URL with custom headers
