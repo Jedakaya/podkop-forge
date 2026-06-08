@@ -110,13 +110,14 @@ function createSectionContent(section) {
     form.Value,
     "subscription_user_agent",
     _("Subscription User-Agent"),
-    _("User-Agent sent when fetching the subscription. Many providers (e.g. Remnawave) return more servers and formats — including XHTTP — for 'v2rayN/9.99' than for the plain sing-box User-Agent, so this fork uses it by default. Pick 'singbox' to go back to the classic 'singbox/<version>', or enter a custom value."),
+    _("User-Agent sent when fetching the subscription. Many providers (e.g. Remnawave) return more servers and formats depending on it: 'v2rayN/9.99' (this fork's default) unlocks XHTTP servers, while a Happ-style User-Agent is the only way to get Hysteria2 servers from such providers. Pick 'singbox' to go back to the classic 'singbox/<version>', or enter a custom value."),
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
   o.placeholder = "v2rayN/9.99";
   o.default = "v2rayN/9.99";
   o.rmempty = true;
   o.value("v2rayN/9.99", _("v2rayN/9.99 (recommended — more servers, XHTTP support)"));
+  o.value("Happ/4.10.2/ios/2605221402666", _("Happ (Hysteria2 support)"));
   o.value("singbox", _("singbox/<version> (classic sing-box format)"));
 
   o = section.option(
