@@ -33,6 +33,19 @@ check_required_file "$PODKOP_LIB/rulesets.sh"
 
 config_load "$PODKOP_CONFIG"
 
+PODKOP_LOCK_FILE="/var/run/podkop.lock"
+
+# Serializes start/stop/restart/reload/subscription_update so that an
+# interface-up triggered reload (e.g. BadWAN monitoring) cannot tear down
+# nft/sing-box while a boot-time start is still building its configuration.
+acquire_lifecycle_lock() {
+    exec 9>"$PODKOP_LOCK_FILE"
+    if ! flock -n 9; then
+        log "Waiting for another podkop start/stop/restart/reload to finish" "info"
+        flock 9
+    fi
+}
+
 check_requirements() {
     log "Check Requirements"
 
@@ -3671,15 +3684,19 @@ EOF
 
 case "$1" in
 start)
+    acquire_lifecycle_lock
     start
     ;;
 stop)
+    acquire_lifecycle_lock
     stop
     ;;
 reload)
+    acquire_lifecycle_lock
     reload
     ;;
 restart)
+    acquire_lifecycle_lock
     restart
     ;;
 main)
@@ -3689,6 +3706,7 @@ list_update)
     list_update
     ;;
 subscription_update)
+    acquire_lifecycle_lock
     subscription_update
     ;;
 check_proxy)
