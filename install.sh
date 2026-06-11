@@ -42,11 +42,73 @@ pkg_remove() {
 }
 
 pkg_list_update() {
+    local out
+    local rc
+
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        apk update
+        out=$(apk update 2>&1)
     else
-        opkg update
+        out=$(opkg update 2>&1)
     fi
+    rc=$?
+    printf '%s\n' "$out"
+
+    [ $rc -eq 0 ] && return 0
+
+    if printf '%s' "$out" | grep -qi "Operation not permitted"; then
+        msg "Похоже на проблему с IPv6 (Operation not permitted). Временно отключаю IPv6 и повторяю..."
+        sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1
+        sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
+
+        if [ "$PKG_IS_APK" -eq 1 ]; then
+            apk update
+        else
+            opkg update
+        fi
+        rc=$?
+
+        sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1
+        sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1
+    fi
+
+    return $rc
+}
+
+# Если домены GitHub не резолвятся (например, из-за блокировок DNS),
+# добавляем статические записи в /etc/hosts. musl-резолвер OpenWrt
+# проверяет /etc/hosts раньше DNS, поэтому это помогает wget сразу,
+# без перезапуска dnsmasq (его всё равно перезапускаем для LAN-клиентов).
+fix_github_dns() {
+    local marker="# podkop-forge: github DNS fallback"
+    local host
+    local broken=0
+
+    grep -qF "$marker" /etc/hosts 2>/dev/null && return
+
+    for host in raw.githubusercontent.com api.github.com github.com; do
+        nslookup "$host" >/dev/null 2>&1 || broken=1
+    done
+
+    [ "$broken" -eq 0 ] && return
+
+    msg "Домены GitHub не резолвятся, добавляем записи в /etc/hosts..."
+
+    {
+        echo "$marker"
+        echo "20.205.243.166 github.com"
+        echo "20.205.243.168 api.github.com"
+        echo "20.205.243.165 codeload.github.com"
+        echo "185.199.108.133 raw.githubusercontent.com"
+        echo "185.199.109.133 raw.githubusercontent.com"
+        echo "185.199.110.133 raw.githubusercontent.com"
+        echo "185.199.111.133 raw.githubusercontent.com"
+        echo "185.199.108.133 objects.githubusercontent.com"
+        echo "185.199.109.133 objects.githubusercontent.com"
+        echo "185.199.108.133 release-assets.githubusercontent.com"
+        echo "185.199.109.133 release-assets.githubusercontent.com"
+    } >> /etc/hosts
+
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1
 }
 
 pkg_install() {
@@ -239,6 +301,8 @@ check_system() {
         msg "DNS is not working."
         exit 1
     fi
+
+    fix_github_dns
 
     # Check version
     if command -v podkop > /dev/null 2>&1; then
