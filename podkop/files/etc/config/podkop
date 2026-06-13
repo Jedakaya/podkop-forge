@@ -43,7 +43,7 @@ config section 'main'
 #        option connection_type 'proxy'
 #        option proxy_config_type 'subscription'
 #        option subscription_url 'https://example.com/api/sub'
-#        #option subscription_user_agent 'v2rayN/9.99' # default for this fork; use 'singbox' for the classic singbox/<version> UA
+#        #option subscription_user_agent 'Happ/4.10.2/ios/2605221402666' # default for this fork; use 'singbox' for classic, 'v2rayN/9.99' for base64 link list
 #        option subscription_update_interval '1h'
 #        #option subscription_group_by_countries '0'
 #        #option urltest_check_interval '3m'

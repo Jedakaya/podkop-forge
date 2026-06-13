@@ -646,14 +646,17 @@ generate_hwid() {
 # on the User-Agent — clients like v2rayN get a base64 link list instead of
 # the sing-box JSON returned for "singbox/<version>" (with XHTTP servers the
 # plain sing-box JSON omits), while Happ-style User-Agents get a third format:
-# a JSON array of full per-server Xray client configs, the only one observed
-# to carry Hysteria2 servers at all.
-# This fork defaults to "v2rayN/9.99" for that reason (our subscription
-# parser understands all three formats, see detect_subscription_format).
+# a JSON array of full per-server Xray client configs. Our parser for that
+# format (_sing_box_cf_add_subscription_outbounds_from_xray_config_list)
+# converts vless (incl. XHTTP/reality/tls) and Hysteria2 — on Remnawave-style
+# providers this is the most complete of the three formats and the only one
+# that carries Hysteria2 at all, so this fork defaults to a Happ User-Agent.
 # Honors the per-section "subscription_user_agent" UCI override:
-#   - unset/empty   -> "v2rayN/9.99" (this fork's default)
+#   - unset/empty   -> Happ-style UA (this fork's default)
 #   - "singbox"     -> classic "singbox/<version>" (sentinel, resolved dynamically)
-#   - anything else -> sent as-is
+#   - anything else -> sent as-is (e.g. "v2rayN/9.99" for providers whose
+#                       Happ-format response omits protocols, like shadowsocks/
+#                       trojan/socks, that only the link-list format carries)
 get_subscription_user_agent() {
     local section="$1"
     local custom_ua=""
@@ -662,7 +665,7 @@ get_subscription_user_agent() {
 
     case "$custom_ua" in
     "")
-        echo "v2rayN/9.99"
+        echo "Happ/4.10.2/ios/2605221402666"
         ;;
     "singbox")
         echo "singbox/$(get_sing_box_version)"
@@ -940,6 +943,28 @@ check_subscription_connectivity() {
 
     rm -f "$errfile"
     return 1
+}
+
+# Some subscription providers/CDNs gzip-compress the response body regardless
+# of the request's Accept-Encoding header. curl (used by download_subscription)
+# does not request or transparently decode gzip, so such a subscription would
+# otherwise reach detect_subscription_format as opaque binary and fail with a
+# confusing "not valid JSON and not a recognizable base64 link list" error.
+# Detects a gzip member via `gzip -t` and, if found, decompresses the file in
+# place. No-op (including for empty/missing files) when the file isn't gzip.
+maybe_decompress_gzip_subscription() {
+    local filepath="$1"
+    local tmpfile
+
+    [ -s "$filepath" ] || return 0
+    gzip -t "$filepath" 2>/dev/null || return 0
+
+    tmpfile="$(mktemp)" || return 0
+    if gzip -dc "$filepath" > "$tmpfile" 2>/dev/null && [ -s "$tmpfile" ]; then
+        mv "$tmpfile" "$filepath"
+    else
+        rm -f "$tmpfile"
+    fi
 }
 
 # Regex matching the proxy URL schemes that sing_box_cf_add_proxy_outbound_with_tag

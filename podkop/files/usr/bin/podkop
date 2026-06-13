@@ -376,6 +376,8 @@ download_subscription_into_cache() {
         return 12
     fi
 
+    maybe_decompress_gzip_subscription "$tmpfile"
+
     file_size="$(wc -c < "$tmpfile" 2>/dev/null | tr -d ' ')"
     log "Downloaded subscription body for section '$section': bytes=${file_size:-unknown}" "debug"
 

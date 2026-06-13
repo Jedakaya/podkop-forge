@@ -191,8 +191,8 @@ _add_outbound_security() {
 
     local security scheme
     security=$(url_get_query_param "$url" "security")
+    scheme="$(url_get_scheme "$url")"
     if [ -z "$security" ]; then
-        scheme="$(url_get_scheme "$url")"
         if [ "$scheme" = "hysteria2" ] || [ "$scheme" = "hy2" ]; then
             security="tls"
         fi
@@ -204,9 +204,18 @@ _add_outbound_security() {
         sni=$(url_get_query_param "$url" "sni")
         insecure=$(_get_insecure_query_param_from_url "$url")
         alpn=$(comma_string_to_json_array "$(url_get_query_param "$url" "alpn")")
-        fingerprint=$(url_get_query_param "$url" "fp")
         public_key=$(url_get_query_param "$url" "pbk")
         short_id=$(url_get_query_param "$url" "sid")
+
+        # sing-box-extended (and presumably mainline) rejects a Hysteria2
+        # (QUIC) outbound configured with a uTLS fingerprint - "unsupported
+        # usage for uTLS" - confirmed live on-router. Many providers still put
+        # "fp=..." on hy2:// links out of habit from vless links; ignore it
+        # for Hysteria2/hy2, same as the Happ-format subscription parser does.
+        case "$scheme" in
+        hysteria2 | hy2) fingerprint="" ;;
+        *) fingerprint=$(url_get_query_param "$url" "fp") ;;
+        esac
 
         config=$(
             sing_box_cm_set_tls_for_outbound \

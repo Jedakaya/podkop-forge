@@ -110,14 +110,14 @@ function createSectionContent(section) {
     form.Value,
     "subscription_user_agent",
     _("Subscription User-Agent"),
-    _("User-Agent sent when fetching the subscription. Many providers (e.g. Remnawave) return more servers and formats depending on it: 'v2rayN/9.99' (this fork's default) unlocks XHTTP servers, while a Happ-style User-Agent is the only way to get Hysteria2 servers from such providers. Pick 'singbox' to go back to the classic 'singbox/<version>', or enter a custom value."),
+    _("User-Agent sent when fetching the subscription. Many providers (e.g. Remnawave) return different servers and formats depending on it: a Happ-style User-Agent (this fork's default) is the most complete for such providers — it's the only way to get Hysteria2 servers, and also includes XHTTP-capable vless servers. 'v2rayN/9.99' returns a base64 link list instead, useful if your provider's Happ-format response is missing protocols like shadowsocks/trojan/socks. Pick 'singbox' to go back to the classic 'singbox/<version>', or enter a custom value."),
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
-  o.placeholder = "v2rayN/9.99";
-  o.default = "v2rayN/9.99";
+  o.placeholder = "Happ/4.10.2/ios/2605221402666";
+  o.default = "Happ/4.10.2/ios/2605221402666";
   o.rmempty = true;
-  o.value("v2rayN/9.99", _("v2rayN/9.99 (recommended — more servers, XHTTP support)"));
-  o.value("Happ/4.10.2/ios/2605221402666", _("Happ (Hysteria2 support)"));
+  o.value("Happ/4.10.2/ios/2605221402666", _("Happ (recommended — Hysteria2 + XHTTP support)"));
+  o.value("v2rayN/9.99", _("v2rayN/9.99 (base64 link list — ss/trojan/socks support)"));
   o.value("singbox", _("singbox/<version> (classic sing-box format)"));
 
   o = section.option(
