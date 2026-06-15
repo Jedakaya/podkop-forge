@@ -85,5 +85,14 @@ export const PodkopShellMethods = {
       Podkop.AvailableMethods.GET_SYSTEM_INFO,
     ),
   subscriptionUpdate: async () =>
-    callBaseMethod<unknown>(Podkop.AvailableMethods.SUBSCRIPTION_UPDATE),
+    // subscription_update can take well over a minute: connectivity
+    // retries (up to ~65s) + download retries (up to ~66s) + a full
+    // podkop restart. The default 15s timeout made the UI report
+    // failure while the router-side update kept running and succeeded.
+    callBaseMethod<unknown>(
+      Podkop.AvailableMethods.SUBSCRIPTION_UPDATE,
+      [],
+      '/usr/bin/podkop',
+      90000,
+    ),
 };

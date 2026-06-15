@@ -571,25 +571,17 @@ async function getConfigSections() {
 }
 
 // src/podkop/methods/shell/callBaseMethod.ts
-async function callBaseMethod(method, args = [], command = "/usr/bin/podkop") {
+async function callBaseMethod(method, args = [], command = "/usr/bin/podkop", timeoutMs = 15e3) {
   const response = await executeShellCommand({
     command,
     args: [method, ...args],
-    timeout: 15e3
+    timeout: timeoutMs
   });
   if (response.stdout) {
     try {
-      const data = JSON.parse(response.stdout);
-      if (data && typeof data === "object" && data.success === false) {
-        return {
-          success: false,
-          data,
-          error: data.message || data.error || ""
-        };
-      }
       return {
         success: true,
-        data
+        data: JSON.parse(response.stdout)
       };
     } catch (_e) {
       return {
@@ -598,9 +590,15 @@ async function callBaseMethod(method, args = [], command = "/usr/bin/podkop") {
       };
     }
   }
+  if (response.code === 0) {
+    return {
+      success: true,
+      data: response.stdout
+    };
+  }
   return {
     success: false,
-    error: ""
+    error: response.stderr || ""
   };
 }
 
@@ -701,7 +699,18 @@ var PodkopShellMethods = {
   getSystemInfo: async () => callBaseMethod(
     Podkop.AvailableMethods.GET_SYSTEM_INFO
   ),
-  subscriptionUpdate: async () => callBaseMethod(Podkop.AvailableMethods.SUBSCRIPTION_UPDATE)
+  subscriptionUpdate: async () => (
+    // subscription_update can take well over a minute: connectivity
+    // retries (up to ~65s) + download retries (up to ~66s) + a full
+    // podkop restart. The default 15s timeout made the UI report
+    // failure while the router-side update kept running and succeeded.
+    callBaseMethod(
+      Podkop.AvailableMethods.SUBSCRIPTION_UPDATE,
+      [],
+      "/usr/bin/podkop",
+      9e4
+    )
+  )
 };
 
 // src/podkop/methods/custom/getDashboardSections.ts
@@ -721,7 +730,7 @@ async function getDashboardSections() {
     })
   );
   const data = configSections.filter(
-    (section) => section.connection_type !== "block" && section[".type"] !== "settings"
+    (section) => section.connection_type !== "block" && section.connection_type !== "exclusion" && section[".type"] !== "settings"
   ).map((section) => {
     if (section.connection_type === "proxy") {
       if (section.proxy_config_type === "url") {
@@ -786,7 +795,7 @@ async function getDashboardSections() {
         }));
         return {
           withTagSelect: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds
         };
@@ -807,7 +816,7 @@ async function getDashboardSections() {
         }));
         return {
           withTagSelect: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds: [
             {
@@ -828,20 +837,24 @@ async function getDashboardSections() {
         const fallbackUrltest = proxies.find(
           (proxy) => proxy.code === `${section[".name"]}-urltest-out`
         );
-        const selectorOutbounds = (selector?.value?.all ?? []).flatMap((code) => {
-          const item = proxies.find((proxy) => proxy.code === code);
-          if (!item) {
-            return [];
+        const selectorOutbounds = (selector?.value?.all ?? []).flatMap(
+          (code) => {
+            const item = proxies.find((proxy) => proxy.code === code);
+            if (!item) {
+              return [];
+            }
+            const isLegacyFastest = item.code === `${section[".name"]}-urltest-out`;
+            return [
+              {
+                code: item.code,
+                displayName: isLegacyFastest ? _("Fastest") : item?.value?.name || "",
+                latency: item?.value?.history?.[0]?.delay || 0,
+                type: item?.value?.type || "",
+                selected: selector?.value?.now === item.code
+              }
+            ];
           }
-          const isLegacyFastest = item.code === `${section[".name"]}-urltest-out`;
-          return [{
-            code: item.code,
-            displayName: isLegacyFastest ? _("Fastest") : item?.value?.name || "",
-            latency: item?.value?.history?.[0]?.delay || 0,
-            type: item?.value?.type || "",
-            selected: selector?.value?.now === item.code
-          }];
-        });
+        );
         const outbounds = [
           ...selectorOutbounds.filter(
             (item) => item.type?.toLowerCase() === "urltest"
@@ -861,7 +874,7 @@ async function getDashboardSections() {
           return {
             withTagSelect: true,
             isSubscription: true,
-            code: selector?.code || section[".name"] + "-out",
+            code: selector?.code || section[".name"],
             displayName: section[".name"],
             outbounds: [
               {
@@ -878,7 +891,7 @@ async function getDashboardSections() {
         return {
           withTagSelect: true,
           isSubscription: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds
         };
@@ -2046,6 +2059,25 @@ function prettyBytes(n) {
   return n + " " + unit;
 }
 
+// src/helpers/showToast.ts
+function showToast(message, type, duration = 3e3) {
+  let container = document.querySelector(".toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.className = "toast-container";
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => toast.classList.add("visible"), 100);
+  setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 // src/podkop/fetchers/fetchServicesInfo.ts
 async function fetchServicesInfo() {
   const [podkop, singbox] = await Promise.all([
@@ -2171,11 +2203,24 @@ async function connectToClashSockets() {
   );
 }
 async function handleChooseOutbound(selector, tag) {
-  const response = await PodkopShellMethods.setClashApiGroupProxy(selector, tag);
-  if (!response.success || response.data?.success === false) {
-    showToast(response.data?.message || _("Failed to switch proxy"), "error");
-  }
+  await PodkopShellMethods.setClashApiGroupProxy(selector, tag);
   await fetchDashboardSections();
+}
+async function handleTestGroupLatency(tag) {
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      latencyFetching: true
+    }
+  });
+  await PodkopShellMethods.getClashApiGroupLatency(tag);
+  await fetchDashboardSections();
+  store.set({
+    sectionsWidget: {
+      ...store.get().sectionsWidget,
+      latencyFetching: false
+    }
+  });
 }
 async function handleUpdateSubscription() {
   store.set({
@@ -2201,22 +2246,6 @@ async function handleUpdateSubscription() {
     sectionsWidget: {
       ...store.get().sectionsWidget,
       subscriptionUpdating: false
-    }
-  });
-}
-async function handleTestGroupLatency(tag) {
-  store.set({
-    sectionsWidget: {
-      ...store.get().sectionsWidget,
-      latencyFetching: true
-    }
-  });
-  await PodkopShellMethods.getClashApiGroupLatency(tag);
-  await fetchDashboardSections();
-  store.set({
-    sectionsWidget: {
-      ...store.get().sectionsWidget,
-      latencyFetching: false
     }
   });
 }
@@ -3548,25 +3577,6 @@ function renderButton({
   );
 }
 
-// src/helpers/showToast.ts
-function showToast(message, type, duration = 3e3) {
-  let container = document.querySelector(".toast-container");
-  if (!container) {
-    container = document.createElement("div");
-    container.className = "toast-container";
-    document.body.appendChild(container);
-  }
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(() => toast.classList.add("visible"), 100);
-  setTimeout(() => {
-    toast.classList.remove("visible");
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
-}
-
 // src/helpers/copyToClipboard.ts
 function copyToClipboard(text) {
   const textarea = document.createElement("textarea");
@@ -4420,7 +4430,10 @@ function renderDiagnosticSystemInfoWidget() {
       };
     }
     const currentVersion = version.replace(/^v/i, "");
-    const latestVersion = diagnosticsSystemInfo.podkop_latest_version.replace(/^v/i, "");
+    const latestVersion = diagnosticsSystemInfo.podkop_latest_version.replace(
+      /^v/i,
+      ""
+    );
     if (currentVersion !== latestVersion) {
       logger.debug(
         "[DIAGNOSTIC]",
@@ -4908,7 +4921,7 @@ async function executeShellCommand({
     );
   } catch (err) {
     const error = err;
-    return { stdout: "", stderr: error?.message, code: 0 };
+    return { stdout: "", stderr: error?.message, code: void 0 };
   }
 }
 
@@ -5029,6 +5042,7 @@ return baseclass.extend({
   REGIONAL_OPTIONS,
   RemoteFakeIPMethods,
   STATUS_COLORS,
+  SUBSCRIPTION_UPDATE_INTERVAL_OPTIONS,
   TabService,
   TabServiceInstance,
   UPDATE_INTERVAL_OPTIONS,

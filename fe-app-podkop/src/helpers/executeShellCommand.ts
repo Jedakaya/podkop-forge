@@ -27,6 +27,6 @@ export async function executeShellCommand({
   } catch (err) {
     const error = err as Error;
 
-    return { stdout: '', stderr: error?.message, code: 0 };
+    return { stdout: '', stderr: error?.message, code: undefined };
   }
 }

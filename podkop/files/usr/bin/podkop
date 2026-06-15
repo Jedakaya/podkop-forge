@@ -371,9 +371,20 @@ download_subscription_into_cache() {
     }
 
     if ! download_subscription "$subscription_url" "$tmpfile" "$service_proxy_address" 3 2 10 "$section"; then
-        log "Subscription body download failed for section '$section' after retries" "error"
-        rm -f "$tmpfile"
-        return 12
+        if [ -n "$service_proxy_address" ]; then
+            log "Subscription body download via proxy failed for section '$section', retrying directly" "warn"
+            if download_subscription "$subscription_url" "$tmpfile" "" 1 0 10 "$section"; then
+                log "Subscription body download for section '$section' succeeded directly after proxy failure" "info"
+            else
+                log "Subscription body download failed for section '$section' after retries" "error"
+                rm -f "$tmpfile"
+                return 12
+            fi
+        else
+            log "Subscription body download failed for section '$section' after retries" "error"
+            rm -f "$tmpfile"
+            return 12
+        fi
     fi
 
     maybe_decompress_gzip_subscription "$tmpfile"
