@@ -7,6 +7,7 @@ import { prettyBytes } from '../../../helpers/prettyBytes';
 import { showToast } from '../../../helpers/showToast';
 import { CustomPodkopMethods, PodkopShellMethods } from '../../methods';
 import { logger, socket, store, StoreType } from '../../services';
+import { Podkop } from '../../types';
 import { renderSections, renderWidget } from './partials';
 import { fetchServicesInfo } from '../../fetchers';
 import { getClashApiSecret } from '../../methods/custom/getClashApiSecret';
@@ -23,7 +24,16 @@ async function fetchDashboardSections() {
     },
   });
 
-  const { data, success } = await CustomPodkopMethods.getDashboardSections();
+  const [sectionsResult, userinfoResult] = await Promise.all([
+    CustomPodkopMethods.getDashboardSections(),
+    PodkopShellMethods.getSubscriptionUserinfo(),
+  ]);
+
+  const { data, success } = sectionsResult;
+  const subscriptionUserinfo: Podkop.SubscriptionUserinfo[] =
+    userinfoResult.success && Array.isArray(userinfoResult.data)
+      ? (userinfoResult.data as Podkop.SubscriptionUserinfo[])
+      : [];
 
   if (!success) {
     logger.error('[DASHBOARD]', 'fetchDashboardSections: failed to fetch');
@@ -35,6 +45,7 @@ async function fetchDashboardSections() {
       loading: false,
       failed: !success,
       data,
+      subscriptionUserinfo,
     },
   });
 }
@@ -219,6 +230,7 @@ async function renderSectionsWidget() {
       onUpdateSubscription: () => {},
       latencyFetching: sectionsWidget.latencyFetching,
       subscriptionUpdating: sectionsWidget.subscriptionUpdating,
+      userinfo: undefined,
     });
 
     return preserveScrollForPage(() => {
@@ -233,6 +245,9 @@ async function renderSectionsWidget() {
       section,
       latencyFetching: sectionsWidget.latencyFetching,
       subscriptionUpdating: sectionsWidget.subscriptionUpdating,
+      userinfo: sectionsWidget.subscriptionUserinfo.find(
+        (u) => u.section === section.code,
+      ),
       onTestLatency: (tag) => {
         if (section.withTagSelect) {
           return handleTestGroupLatency(tag);

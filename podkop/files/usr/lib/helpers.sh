@@ -714,6 +714,23 @@ save_subscription_userinfo() {
     fi
 }
 
+# Issues a HEAD request via curl to capture response headers into hdrfile.
+# Used when wget handled the download (wget can't dump headers separately).
+# Silent no-op when curl is unavailable or the request fails.
+fetch_userinfo_via_head() {
+    local url="$1"
+    local hdrfile="$2"
+    local user_agent="$3"
+    local hwid="$4"
+    command -v curl >/dev/null 2>&1 || return 0
+    curl -s -I --max-time 8 \
+        -H "User-Agent: $user_agent" \
+        -H "X-HWID: $hwid" \
+        -D "$hdrfile" \
+        -o /dev/null \
+        "$url" 2>/dev/null || true
+}
+
 # Downloads a subscription JSON from the given URL with custom headers
 # Arguments:
 #   $1 - subscription URL
@@ -806,7 +823,10 @@ download_subscription() {
                 rm -f "$tmpfile" "$errfile" "$hdrfile"
                 return 1
             fi
-            [ -n "$section" ] && save_subscription_userinfo "$hdrfile" "$section"
+            if [ -n "$section" ]; then
+                [ -f "$hdrfile" ] || fetch_userinfo_via_head "$url" "$hdrfile" "$user_agent" "$hwid"
+                save_subscription_userinfo "$hdrfile" "$section"
+            fi
             rm -f "$errfile" "$hdrfile"
             return 0
         fi
@@ -852,7 +872,10 @@ download_subscription() {
                     rm -f "$tmpfile" "$errfile" "$hdrfile"
                     return 1
                 fi
-                [ -n "$section" ] && save_subscription_userinfo "$hdrfile" "$section"
+                if [ -n "$section" ]; then
+                    [ -f "$hdrfile" ] || fetch_userinfo_via_head "$url" "$hdrfile" "$user_agent" "$hwid"
+                    save_subscription_userinfo "$hdrfile" "$section"
+                fi
                 rm -f "$errfile" "$hdrfile"
                 return 0
             fi

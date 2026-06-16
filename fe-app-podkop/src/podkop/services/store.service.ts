@@ -167,6 +167,7 @@ export interface StoreType {
     data: Podkop.OutboundGroup[];
     latencyFetching: boolean;
     subscriptionUpdating: boolean;
+    subscriptionUserinfo: Podkop.SubscriptionUserinfo[];
   };
   diagnosticsRunAction: {
     loading: boolean;
@@ -226,6 +227,7 @@ const initialStore: StoreType = {
     latencyFetching: false,
     subscriptionUpdating: false,
     data: [],
+    subscriptionUserinfo: [],
   },
   dnsFailoverActive: false,
   ...initialDiagnosticStore,

@@ -9,6 +9,7 @@ interface IRenderSectionsProps {
   onUpdateSubscription: () => void;
   latencyFetching: boolean;
   subscriptionUpdating: boolean;
+  userinfo?: Podkop.SubscriptionUserinfo;
 }
 
 function renderFailedState() {
@@ -30,6 +31,22 @@ function renderLoadingState() {
   });
 }
 
+function renderExpiryBadge(userinfo: Podkop.SubscriptionUserinfo) {
+  if (userinfo.expire <= 0) return '';
+  const now = Math.floor(Date.now() / 1000);
+  const daysLeft = Math.floor((userinfo.expire - now) / 86400);
+  const expired = daysLeft < 0;
+  const label = expired
+    ? _('Expired')
+    : daysLeft === 0
+      ? _('Today')
+      : `${daysLeft}d`;
+  const color = expired ? '#e74c3c' : daysLeft < 7 ? '#e67e22' : '#27ae60';
+  return E('span', {
+    style: `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`,
+  }, label);
+}
+
 export function renderDefaultState({
   section,
   onChooseOutbound,
@@ -37,6 +54,7 @@ export function renderDefaultState({
   onUpdateSubscription,
   latencyFetching,
   subscriptionUpdating,
+  userinfo,
 }: IRenderSectionsProps) {
   function testLatency() {
     if (section.withTagSelect) {
@@ -99,7 +117,7 @@ export function renderDefaultState({
         {
           class: 'pdk_dashboard-page__outbound-section__title-section__title',
         },
-        section.displayName,
+        [section.displayName, userinfo ? renderExpiryBadge(userinfo) : ''],
       ),
       E('div', { style: 'display: flex; gap: 8px' }, [
         section.isSubscription

@@ -1485,7 +1485,8 @@ var initialStore = {
     failed: false,
     latencyFetching: false,
     subscriptionUpdating: false,
-    data: []
+    data: [],
+    subscriptionUserinfo: []
   },
   dnsFailoverActive: false,
   ...initialDiagnosticStore
@@ -1840,13 +1841,25 @@ function renderLoadingState() {
     style: "height: 127px"
   });
 }
+function renderExpiryBadge(userinfo) {
+  if (userinfo.expire <= 0) return "";
+  const now = Math.floor(Date.now() / 1e3);
+  const daysLeft = Math.floor((userinfo.expire - now) / 86400);
+  const expired = daysLeft < 0;
+  const label = expired ? _("Expired") : daysLeft === 0 ? _("Today") : `${daysLeft}d`;
+  const color = expired ? "#e74c3c" : daysLeft < 7 ? "#e67e22" : "#27ae60";
+  return E("span", {
+    style: `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`
+  }, label);
+}
 function renderDefaultState({
   section,
   onChooseOutbound,
   onTestLatency,
   onUpdateSubscription,
   latencyFetching,
-  subscriptionUpdating
+  subscriptionUpdating,
+  userinfo
 }) {
   function testLatency() {
     if (section.withTagSelect) {
@@ -1900,7 +1913,7 @@ function renderDefaultState({
         {
           class: "pdk_dashboard-page__outbound-section__title-section__title"
         },
-        section.displayName
+        [section.displayName, userinfo ? renderExpiryBadge(userinfo) : ""]
       ),
       E("div", { style: "display: flex; gap: 8px" }, [
         section.isSubscription ? subscriptionUpdating ? E("div", {
@@ -2125,7 +2138,12 @@ async function fetchDashboardSections() {
       failed: false
     }
   });
-  const { data, success } = await CustomPodkopMethods.getDashboardSections();
+  const [sectionsResult, userinfoResult] = await Promise.all([
+    CustomPodkopMethods.getDashboardSections(),
+    PodkopShellMethods.getSubscriptionUserinfo()
+  ]);
+  const { data, success } = sectionsResult;
+  const subscriptionUserinfo = userinfoResult.success && Array.isArray(userinfoResult.data) ? userinfoResult.data : [];
   if (!success) {
     logger.error("[DASHBOARD]", "fetchDashboardSections: failed to fetch");
   }
@@ -2134,7 +2152,8 @@ async function fetchDashboardSections() {
       latencyFetching: false,
       loading: false,
       failed: !success,
-      data
+      data,
+      subscriptionUserinfo
     }
   });
 }
@@ -2298,7 +2317,8 @@ async function renderSectionsWidget() {
       onUpdateSubscription: () => {
       },
       latencyFetching: sectionsWidget.latencyFetching,
-      subscriptionUpdating: sectionsWidget.subscriptionUpdating
+      subscriptionUpdating: sectionsWidget.subscriptionUpdating,
+      userinfo: void 0
     });
     return preserveScrollForPage(() => {
       container.replaceChildren(renderedWidget);
@@ -2311,6 +2331,9 @@ async function renderSectionsWidget() {
       section,
       latencyFetching: sectionsWidget.latencyFetching,
       subscriptionUpdating: sectionsWidget.subscriptionUpdating,
+      userinfo: sectionsWidget.subscriptionUserinfo.find(
+        (u) => u.section === section.code
+      ),
       onTestLatency: (tag) => {
         if (section.withTagSelect) {
           return handleTestGroupLatency(tag);
