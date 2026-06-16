@@ -181,7 +181,9 @@ export interface StoreType {
     globalCheck: { loading: boolean };
     viewLogs: { loading: boolean };
     showSingBoxConfig: { loading: boolean };
+    dnsFailoverRetryOriginal: { loading: boolean };
   };
+  dnsFailoverActive: boolean;
   diagnosticsSystemInfo: {
     loading: boolean;
     podkop_version: string;
@@ -225,6 +227,7 @@ const initialStore: StoreType = {
     subscriptionUpdating: false,
     data: [],
   },
+  dnsFailoverActive: false,
   ...initialDiagnosticStore,
 };
 

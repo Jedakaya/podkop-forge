@@ -676,6 +676,44 @@ get_subscription_user_agent() {
     esac
 }
 
+# Parses subscription-userinfo header from a curl dump file and saves as JSON.
+# Only saves when both expire and total are non-zero to avoid useless files.
+save_subscription_userinfo() {
+    local hdrfile="$1"
+    local section="$2"
+
+    [ -f "$hdrfile" ] || return 0
+
+    local userinfo_line
+    userinfo_line="$(grep -i "^subscription-userinfo:" "$hdrfile" | head -1 | tr -d '\r')"
+    [ -n "$userinfo_line" ] || return 0
+
+    local value upload dl total expire
+    value="${userinfo_line#*: }"
+    upload="$(printf '%s' "$value" | grep -oE 'upload=[0-9]+' | cut -d= -f2)"
+    dl="$(printf '%s' "$value" | grep -oE 'download=[0-9]+' | cut -d= -f2)"
+    total="$(printf '%s' "$value" | grep -oE 'total=[0-9]+' | cut -d= -f2)"
+    expire="$(printf '%s' "$value" | grep -oE 'expire=[0-9]+' | cut -d= -f2)"
+
+    upload="${upload:-0}"
+    dl="${dl:-0}"
+    total="${total:-0}"
+    expire="${expire:-0}"
+
+    [ "$expire" -eq 0 ] && [ "$total" -eq 0 ] && return 0
+
+    local userinfo_out tmpfile
+    userinfo_out="$SUBSCRIPTION_CACHE_FOLDER/${section}.userinfo"
+    tmpfile="${userinfo_out}.tmp.$$"
+    if printf '{"upload":%s,"download":%s,"total":%s,"expire":%s}' \
+        "$upload" "$dl" "$total" "$expire" > "$tmpfile" && mv "$tmpfile" "$userinfo_out"; then
+        chmod 600 "$userinfo_out" 2>/dev/null
+        log "Subscription userinfo saved for section '$section' (expire=$expire total=$total)" "debug"
+    else
+        rm -f "$tmpfile"
+    fi
+}
+
 # Downloads a subscription JSON from the given URL with custom headers
 # Arguments:
 #   $1 - subscription URL
@@ -700,10 +738,11 @@ download_subscription() {
     kernel_version="$(get_kernel_version)"
     hwid="$(generate_hwid)"
 
-    local tmpfile errfile rc family
+    local tmpfile errfile hdrfile rc family
     tmpfile="${filepath}.part.$$"
     errfile="${filepath}.err.$$"
-    rm -f "$tmpfile" "$errfile"
+    hdrfile="${filepath}.hdr.$$"
+    rm -f "$tmpfile" "$errfile" "$hdrfile"
 
     for attempt in $(seq 1 "$retries"); do
         family="any"
@@ -719,6 +758,7 @@ download_subscription() {
                     -H "X-Ver-OS: $kernel_version" \
                     -H "Accept-Language: ru-RU,en,*" \
                     -H "X-Device-Locale: EN" \
+                    -D "$hdrfile" \
                     -o "$tmpfile" \
                     "$url" 2>"$errfile"
             else
@@ -743,6 +783,7 @@ download_subscription() {
                     -H "X-Ver-OS: $kernel_version" \
                     -H "Accept-Language: ru-RU,en,*" \
                     -H "X-Device-Locale: EN" \
+                    -D "$hdrfile" \
                     -o "$tmpfile" \
                     "$url" 2>"$errfile"
             else
@@ -762,10 +803,11 @@ download_subscription() {
         if [ "$rc" -eq 0 ] && [ -s "$tmpfile" ]; then
             if ! mv "$tmpfile" "$filepath"; then
                 log "Subscription download succeeded but failed to move temporary file to destination" "error"
-                rm -f "$tmpfile" "$errfile"
+                rm -f "$tmpfile" "$errfile" "$hdrfile"
                 return 1
             fi
-            rm -f "$errfile"
+            [ -n "$section" ] && save_subscription_userinfo "$hdrfile" "$section"
+            rm -f "$errfile" "$hdrfile"
             return 0
         fi
 
@@ -773,7 +815,7 @@ download_subscription() {
             log "Subscription download returned success but produced an empty file: host=$(url_host_for_log "$url"), url=$(redact_url_for_log "$url")" "warn"
         fi
 
-        rm -f "$tmpfile"
+        rm -f "$tmpfile" "$hdrfile"
         log_wget_failure "Subscription download" "$url" "$errfile" "$rc" "$attempt" "$retries" "$timeout" "$http_proxy_address" "$family"
 
         if [ "$family" != "ipv4" ] && has_ipv4_default_route && wget_supports_ipv4_flag; then
@@ -789,6 +831,7 @@ download_subscription() {
                     -H "X-Ver-OS: $kernel_version" \
                     -H "Accept-Language: ru-RU,en,*" \
                     -H "X-Device-Locale: EN" \
+                    -D "$hdrfile" \
                     -o "$tmpfile" \
                     "$url" 2>"$errfile"
             else
@@ -806,10 +849,11 @@ download_subscription() {
             if [ "$rc" -eq 0 ] && [ -s "$tmpfile" ]; then
                 if ! mv "$tmpfile" "$filepath"; then
                     log "Subscription download IPv4 retry succeeded but failed to move temporary file to destination" "error"
-                    rm -f "$tmpfile" "$errfile"
+                    rm -f "$tmpfile" "$errfile" "$hdrfile"
                     return 1
                 fi
-                rm -f "$errfile"
+                [ -n "$section" ] && save_subscription_userinfo "$hdrfile" "$section"
+                rm -f "$errfile" "$hdrfile"
                 return 0
             fi
             if [ "$rc" -eq 0 ] && [ ! -s "$tmpfile" ]; then
@@ -821,8 +865,7 @@ download_subscription() {
         sleep "$wait"
     done
 
-    rm -f "$tmpfile"
-    rm -f "$errfile"
+    rm -f "$tmpfile" "$errfile" "$hdrfile"
     log "Subscription download failed after $retries attempts: host=$(url_host_for_log "$url"), url=$(redact_url_for_log "$url")" "error"
     return 1
 }

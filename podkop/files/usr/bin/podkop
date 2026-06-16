@@ -34,6 +34,8 @@ check_required_file "$PODKOP_LIB/rulesets.sh"
 config_load "$PODKOP_CONFIG"
 
 PODKOP_LOCK_FILE="/var/run/podkop.lock"
+DNS_FAILOVER_FAILURE_FILE="/var/run/podkop_dns_failover_failures"
+DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 udp:8.8.8.8"
 
 # Serializes start/stop/restart/reload/subscription_update so that an
 # interface-up triggered reload (e.g. BadWAN monitoring) cannot tear down
@@ -575,6 +577,197 @@ start_subscription_startup_retry_worker() {
     log "Started deferred startup recovery worker with PID $!" "warn"
 }
 
+dns_failover_probe_dns() {
+    local dns_type="$1"
+    local dns_server="$2"
+    local domain="google.com"
+
+    case "$dns_type" in
+    doh)
+        local doh_path="/dns-query"
+        local doh_host="$dns_server"
+        if echo "$dns_server" | grep -q "/"; then
+            doh_path="/$(echo "$dns_server" | cut -d'/' -f2-)"
+            doh_host="$(echo "$dns_server" | cut -d'/' -f1)"
+        fi
+        dig @"$doh_host" "$domain" +https="$doh_path" +timeout=3 +tries=1 > /dev/null 2>&1
+        ;;
+    dot)
+        dig @"$dns_server" "$domain" +tls +timeout=3 +tries=1 > /dev/null 2>&1
+        ;;
+    udp|*)
+        dig @"$dns_server" "$domain" +timeout=3 +tries=1 > /dev/null 2>&1
+        ;;
+    esac
+}
+
+dns_failover_wan_is_up() {
+    ip route 2>/dev/null | grep -q "^default"
+}
+
+dns_failover_activate() {
+    local dns_failover_active dns_failover_index
+    config_get_bool dns_failover_active "settings" "dns_failover_active" 0
+    config_get dns_failover_index "settings" "dns_failover_index" "0"
+
+    if [ "$dns_failover_active" -eq 0 ]; then
+        local orig_type orig_server orig_bootstrap
+        config_get orig_type "settings" "dns_type"
+        config_get orig_server "settings" "dns_server"
+        config_get orig_bootstrap "settings" "bootstrap_dns_server"
+
+        uci_set "podkop" "settings" "dns_failover_original_type" "$orig_type"
+        uci_set "podkop" "settings" "dns_failover_original_server" "$orig_server"
+        uci_set "podkop" "settings" "dns_failover_original_bootstrap" "${orig_bootstrap:-}"
+        uci_set "podkop" "settings" "dns_failover_active" 1
+        dns_failover_index=0
+        log "DNS failover: saving original DNS: type=$orig_type server=$orig_server" "info"
+    fi
+
+    local i=0 fallback_type fallback_server found=0
+    for entry in $DNS_FAILOVER_FALLBACK_LIST; do
+        if [ "$i" -ge "$dns_failover_index" ]; then
+            fallback_type="${entry%%:*}"
+            fallback_server="${entry##*:}"
+            found=1
+            break
+        fi
+        i=$((i + 1))
+    done
+
+    if [ "$found" -eq 0 ]; then
+        log "DNS failover: all fallback DNS options exhausted" "error"
+        return 1
+    fi
+
+    local cur_type cur_server
+    config_get cur_type "settings" "dns_type"
+    config_get cur_server "settings" "dns_server"
+    log "DNS failover: $cur_type/$cur_server unreachable → switching to $fallback_type/$fallback_server" "warn"
+
+    uci_set "podkop" "settings" "dns_type" "$fallback_type"
+    uci_set "podkop" "settings" "dns_server" "$fallback_server"
+    uci_set "podkop" "settings" "dns_failover_index" "$((i + 1))"
+    uci_commit "podkop"
+    config_load "$PODKOP_CONFIG"
+    rm -f "$DNS_FAILOVER_FAILURE_FILE"
+
+    reload
+}
+
+dns_health_check() {
+    local enable_dns_failover
+    config_get_bool enable_dns_failover "settings" "enable_dns_failover" 1
+    [ "$enable_dns_failover" -eq 1 ] || return 0
+
+    local dns_type dns_server
+    config_get dns_type "settings" "dns_type"
+    config_get dns_server "settings" "dns_server"
+
+    if dns_failover_probe_dns "$dns_type" "$dns_server"; then
+        rm -f "$DNS_FAILOVER_FAILURE_FILE"
+        log "DNS health check: $dns_type/$dns_server is reachable" "debug"
+        return 0
+    fi
+
+    if ! dns_failover_wan_is_up; then
+        log "DNS health check: $dns_type/$dns_server unreachable but no default route — WAN may be down, skipping failover" "debug"
+        rm -f "$DNS_FAILOVER_FAILURE_FILE"
+        return 0
+    fi
+
+    local failures=0
+    [ -f "$DNS_FAILOVER_FAILURE_FILE" ] && failures="$(cat "$DNS_FAILOVER_FAILURE_FILE" 2>/dev/null)"
+    [ -z "$failures" ] && failures=0
+    failures=$((failures + 1))
+    echo "$failures" > "$DNS_FAILOVER_FAILURE_FILE"
+
+    log "DNS health check: $dns_type/$dns_server unreachable, WAN up [$failures/3]" "warn"
+
+    if [ "$failures" -ge 3 ]; then
+        log "DNS health check: 3 consecutive failures, triggering failover" "warn"
+        acquire_lifecycle_lock
+        dns_failover_activate
+    fi
+}
+
+dns_failover_retry_original() {
+    local dns_failover_active
+    config_get_bool dns_failover_active "settings" "dns_failover_active" 0
+
+    if [ "$dns_failover_active" -eq 0 ]; then
+        log "DNS failover retry: no active failover to revert" "info"
+        echo '{"result":"no_failover_active"}'
+        return 0
+    fi
+
+    local orig_type orig_server orig_bootstrap
+    config_get orig_type "settings" "dns_failover_original_type"
+    config_get orig_server "settings" "dns_failover_original_server"
+    config_get orig_bootstrap "settings" "dns_failover_original_bootstrap"
+
+    if dns_failover_probe_dns "$orig_type" "$orig_server"; then
+        log "DNS failover retry: original $orig_type/$orig_server is reachable, reverting" "info"
+
+        uci_set "podkop" "settings" "dns_type" "$orig_type"
+        uci_set "podkop" "settings" "dns_server" "$orig_server"
+        [ -n "$orig_bootstrap" ] && uci_set "podkop" "settings" "bootstrap_dns_server" "$orig_bootstrap"
+        uci_remove "podkop" "settings" "dns_failover_active"
+        uci_remove "podkop" "settings" "dns_failover_original_type"
+        uci_remove "podkop" "settings" "dns_failover_original_server"
+        uci_remove "podkop" "settings" "dns_failover_original_bootstrap"
+        uci_remove "podkop" "settings" "dns_failover_index"
+        uci_commit "podkop"
+        config_load "$PODKOP_CONFIG"
+        rm -f "$DNS_FAILOVER_FAILURE_FILE"
+
+        reload
+        echo '{"result":"reverted"}'
+    else
+        log "DNS failover retry: original $orig_type/$orig_server still unreachable" "warn"
+        echo '{"result":"still_unreachable"}'
+    fi
+}
+
+add_dns_health_check_cron_job() {
+    local enable_dns_failover
+    config_get_bool enable_dns_failover "settings" "enable_dns_failover" 1
+    [ "$enable_dns_failover" -eq 1 ] || return 0
+
+    (crontab -l | grep -v "/usr/bin/podkop dns_health_check") | {
+        cat
+        echo "*/2 * * * * /usr/bin/podkop dns_health_check"
+    } | crontab -
+    log "DNS health check cron job added (every 2 minutes)"
+}
+
+get_subscription_userinfo() {
+    local result="[]"
+
+    _collect_userinfo() {
+        local section="$1"
+        local connection_type proxy_config_type
+        config_get connection_type "$section" "connection_type"
+        [ "$connection_type" = "proxy" ] || return
+        config_get proxy_config_type "$section" "proxy_config_type"
+        [ "$proxy_config_type" = "subscription" ] || return
+
+        local userinfo_file="$SUBSCRIPTION_CACHE_FOLDER/${section}.userinfo"
+        [ -s "$userinfo_file" ] || return
+
+        local userinfo
+        userinfo="$(cat "$userinfo_file" 2>/dev/null)"
+        [ -n "$userinfo" ] || return
+
+        result="$(echo "$result" | jq -ac \
+            --arg s "$section" \
+            --argjson d "$userinfo" \
+            '. + [{"section":$s} + $d]' 2>/dev/null || echo "$result")"
+    }
+    config_foreach _collect_userinfo "section"
+    echo "$result"
+}
+
 start_main() {
     log "Starting podkop"
 
@@ -612,6 +805,7 @@ start_main() {
     sing_box_init_config
     config_foreach add_cron_job "section"
     config_foreach add_subscription_cron_job "section"
+    add_dns_health_check_cron_job
     /etc/init.d/sing-box start
 
     if [ "$subscription_startup_blocked" -ne 0 ]; then
@@ -967,7 +1161,7 @@ add_cron_job() {
 }
 
 remove_cron_job() {
-    (crontab -l | grep -v "/usr/bin/podkop list_update" | grep -v "/usr/bin/podkop subscription_update") | crontab -
+    (crontab -l | grep -v "/usr/bin/podkop list_update" | grep -v "/usr/bin/podkop subscription_update" | grep -v "/usr/bin/podkop dns_health_check") | crontab -
     log "The cron job removed"
 }
 
@@ -3028,7 +3222,12 @@ check_dns_available() {
     config_foreach check_dhcp_has_podkop_dns dnsmasq
     config_load "$PODKOP_CONFIG"
 
-    echo "{\"dns_type\":\"$dns_type\",\"dns_server\":\"$display_dns_server\",\"dns_status\":$dns_status,\"dns_on_router\":$dns_on_router,\"bootstrap_dns_server\":\"$bootstrap_dns_server\",\"bootstrap_dns_status\":$bootstrap_dns_status,\"dhcp_config_status\":$dhcp_config_status}" | jq .
+    local dns_failover_active dns_failover_original_type dns_failover_original_server
+    config_get_bool dns_failover_active "settings" "dns_failover_active" 0
+    config_get dns_failover_original_type "settings" "dns_failover_original_type" ""
+    config_get dns_failover_original_server "settings" "dns_failover_original_server" ""
+
+    echo "{\"dns_type\":\"$dns_type\",\"dns_server\":\"$display_dns_server\",\"dns_status\":$dns_status,\"dns_on_router\":$dns_on_router,\"bootstrap_dns_server\":\"$bootstrap_dns_server\",\"bootstrap_dns_status\":$bootstrap_dns_status,\"dhcp_config_status\":$dhcp_config_status,\"dns_failover_active\":$dns_failover_active,\"dns_failover_original_type\":\"${dns_failover_original_type:-}\",\"dns_failover_original_server\":\"${dns_failover_original_server:-}\"}" | jq .
 }
 
 check_dhcp_has_podkop_dns() {
@@ -3772,6 +3971,16 @@ get_system_info)
     ;;
 check_dns_available)
     check_dns_available
+    ;;
+dns_health_check)
+    dns_health_check
+    ;;
+dns_failover_retry_original)
+    acquire_lifecycle_lock
+    dns_failover_retry_original
+    ;;
+get_subscription_userinfo)
+    get_subscription_userinfo
     ;;
 global_check)
     global_check "${2:-}"

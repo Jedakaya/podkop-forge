@@ -624,6 +624,8 @@ var Podkop;
     AvailableMethods2["CHECK_LOGS"] = "check_logs";
     AvailableMethods2["GET_SYSTEM_INFO"] = "get_system_info";
     AvailableMethods2["SUBSCRIPTION_UPDATE"] = "subscription_update";
+    AvailableMethods2["DNS_FAILOVER_RETRY_ORIGINAL"] = "dns_failover_retry_original";
+    AvailableMethods2["GET_SUBSCRIPTION_USERINFO"] = "get_subscription_userinfo";
   })(AvailableMethods = Podkop2.AvailableMethods || (Podkop2.AvailableMethods = {}));
   let AvailableClashAPIMethods;
   ((AvailableClashAPIMethods2) => {
@@ -710,6 +712,12 @@ var PodkopShellMethods = {
       "/usr/bin/podkop",
       9e4
     )
+  ),
+  dnsFailoverRetryOriginal: async () => callBaseMethod(
+    Podkop.AvailableMethods.DNS_FAILOVER_RETRY_ORIGINAL
+  ),
+  getSubscriptionUserinfo: async () => callBaseMethod(
+    Podkop.AvailableMethods.GET_SUBSCRIPTION_USERINFO
   )
 };
 
@@ -1263,6 +1271,9 @@ var initialDiagnosticStore = {
     },
     showSingBoxConfig: {
       loading: false
+    },
+    dnsFailoverRetryOriginal: {
+      loading: false
     }
   },
   diagnosticsRunAction: { loading: false },
@@ -1476,6 +1487,7 @@ var initialStore = {
     subscriptionUpdating: false,
     data: []
   },
+  dnsFailoverActive: false,
   ...initialDiagnosticStore
 };
 var store = new StoreService(initialStore);
@@ -2689,6 +2701,16 @@ function getMeta({ allGood, atLeastOneGood }) {
 }
 
 // src/podkop/tabs/diagnostic/checks/runDnsCheck.ts
+function formatExpiry(expireTs) {
+  if (expireTs <= 0) return "";
+  return new Date(expireTs * 1e3).toLocaleDateString();
+}
+function formatBytes(bytes) {
+  if (bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[Math.min(i, units.length - 1)]}`;
+}
 async function runDnsCheck() {
   const { order, title, code } = DIAGNOSTICS_CHECKS_MAP.DNS;
   updateCheckStore({
@@ -2699,7 +2721,10 @@ async function runDnsCheck() {
     state: "loading",
     items: []
   });
-  const dnsChecks = await PodkopShellMethods.checkDNSAvailable();
+  const [dnsChecks, userinfoResult] = await Promise.all([
+    PodkopShellMethods.checkDNSAvailable(),
+    PodkopShellMethods.getSubscriptionUserinfo()
+  ]);
   if (!dnsChecks.success) {
     updateCheckStore({
       order,
@@ -2712,9 +2737,36 @@ async function runDnsCheck() {
     throw new Error("DNS checks failed");
   }
   const data = dnsChecks.data;
+  store.set({ dnsFailoverActive: Boolean(data.dns_failover_active) });
   const allGood = Boolean(data.dns_on_router) && Boolean(data.dhcp_config_status) && Boolean(data.bootstrap_dns_status) && Boolean(data.dns_status);
   const atLeastOneGood = Boolean(data.dns_on_router) || Boolean(data.dhcp_config_status) || Boolean(data.bootstrap_dns_status) || Boolean(data.dns_status);
   const { state, description } = getMeta({ atLeastOneGood, allGood });
+  const subscriptionItems = [];
+  if (userinfoResult.success && Array.isArray(userinfoResult.data)) {
+    const now = Math.floor(Date.now() / 1e3);
+    for (const sub of userinfoResult.data) {
+      if (sub.expire > 0) {
+        const daysLeft = Math.floor((sub.expire - now) / 86400);
+        const expState = daysLeft < 0 ? "error" : daysLeft < 7 ? "warning" : "success";
+        const label = daysLeft < 0 ? _("Expired") : daysLeft === 0 ? _("Expires today") : `${daysLeft}d`;
+        subscriptionItems.push({
+          state: expState,
+          key: `${_("Subscription")} [${sub.section}] ${_("expires")}`,
+          value: `${formatExpiry(sub.expire)} (${label})`
+        });
+      }
+      if (sub.total > 0) {
+        const used = sub.upload + sub.download;
+        const pct = Math.min(100, Math.round(used / sub.total * 100));
+        const trafficState = pct >= 90 ? "warning" : "success";
+        subscriptionItems.push({
+          state: trafficState,
+          key: `${_("Subscription")} [${sub.section}] ${_("traffic")}`,
+          value: `${formatBytes(used)} / ${formatBytes(sub.total)} (${pct}%)`
+        });
+      }
+    }
+  }
   updateCheckStore({
     order,
     code,
@@ -2746,7 +2798,15 @@ async function runDnsCheck() {
         state: data.dhcp_config_status ? "success" : "error",
         key: _("DHCP has DNS server"),
         value: ""
-      }
+      },
+      ...insertIf(Boolean(data.dns_failover_active), [
+        {
+          state: "warning",
+          key: _("DNS Failover active"),
+          value: `${data.dns_failover_original_type}/${data.dns_failover_original_server} \u2192 ${data.dns_server} [${data.dns_type}]`
+        }
+      ]),
+      ...subscriptionItems
     ]
   });
   if (!atLeastOneGood) {
@@ -3638,7 +3698,8 @@ function renderAvailableActions({
   disable,
   globalCheck,
   viewLogs,
-  showSingBoxConfig
+  showSingBoxConfig,
+  dnsFailoverRetryOriginal
 }) {
   return E("div", { class: "pdk_diagnostic-page__right-bar__actions" }, [
     E("b", {}, _("Available actions")),
@@ -3717,6 +3778,16 @@ function renderAvailableActions({
         text: _("Show sing-box config"),
         loading: showSingBoxConfig.loading,
         disabled: showSingBoxConfig.disabled
+      })
+    ]),
+    ...insertIf(dnsFailoverRetryOriginal.visible, [
+      renderButton({
+        classNames: ["cbi-button-action"],
+        onClick: dnsFailoverRetryOriginal.onClick,
+        icon: renderCircleXIcon24,
+        text: _("Restore original DNS"),
+        loading: dnsFailoverRetryOriginal.loading,
+        disabled: dnsFailoverRetryOriginal.disabled
       })
     ])
   ]);
@@ -4294,6 +4365,41 @@ async function handleViewLogs() {
     });
   }
 }
+async function handleDnsFailoverRetryOriginal() {
+  const diagnosticsActions = store.get().diagnosticsActions;
+  store.set({
+    diagnosticsActions: {
+      ...diagnosticsActions,
+      dnsFailoverRetryOriginal: { loading: true }
+    }
+  });
+  try {
+    const result = await PodkopShellMethods.dnsFailoverRetryOriginal();
+    if (result.success) {
+      const res = result.data.result;
+      if (res === "reverted") {
+        store.set({ dnsFailoverActive: false });
+        showToast(_("Original DNS restored successfully"), "success");
+      } else if (res === "still_unreachable") {
+        showToast(_("Original DNS is still unreachable"), "error");
+      } else {
+        showToast(_("No active DNS failover"), "info");
+      }
+    } else {
+      showToast(_("Failed to execute!"), "error");
+    }
+  } catch (e) {
+    logger.error("[DIAGNOSTIC]", "handleDnsFailoverRetryOriginal - e", e);
+    showToast(_("Failed to execute!"), "error");
+  } finally {
+    store.set({
+      diagnosticsActions: {
+        ...store.get().diagnosticsActions,
+        dnsFailoverRetryOriginal: { loading: false }
+      }
+    });
+  }
+}
 async function handleShowSingBoxConfig() {
   const diagnosticsActions = store.get().diagnosticsActions;
   store.set({
@@ -4356,6 +4462,7 @@ function renderDiagnosticAvailableActionsWidget() {
   const podkopEnabled = Boolean(servicesInfoWidget.data.podkop);
   const singBoxRunning = Boolean(servicesInfoWidget.data.singbox);
   const atLeastOneServiceCommandLoading = servicesInfoWidget.loading || diagnosticsActions.restart.loading || diagnosticsActions.start.loading || diagnosticsActions.stop.loading;
+  const dnsFailoverActive = store.get().dnsFailoverActive;
   const container = document.getElementById("pdk_diagnostic-page-actions");
   const renderedActions = renderAvailableActions({
     restart: {
@@ -4405,6 +4512,12 @@ function renderDiagnosticAvailableActionsWidget() {
       visible: true,
       onClick: handleShowSingBoxConfig,
       disabled: atLeastOneServiceCommandLoading
+    },
+    dnsFailoverRetryOriginal: {
+      loading: diagnosticsActions.dnsFailoverRetryOriginal.loading,
+      visible: dnsFailoverActive,
+      onClick: handleDnsFailoverRetryOriginal,
+      disabled: atLeastOneServiceCommandLoading || diagnosticsActions.dnsFailoverRetryOriginal.loading
     }
   });
   return preserveScrollForPage(() => {
@@ -4491,7 +4604,7 @@ async function onStoreUpdate2(next, prev, diff) {
   if (diff.diagnosticsRunAction) {
     renderDiagnosticRunActionWidget();
   }
-  if (diff.diagnosticsActions || diff.servicesInfoWidget) {
+  if (diff.diagnosticsActions || diff.servicesInfoWidget || diff.dnsFailoverActive) {
     renderDiagnosticAvailableActionsWidget();
   }
   if (diff.diagnosticsSystemInfo) {
@@ -4532,7 +4645,8 @@ function onPageUnmount2() {
     "diagnosticsActions",
     "diagnosticsSystemInfo",
     "diagnosticsChecks",
-    "diagnosticsRunAction"
+    "diagnosticsRunAction",
+    "dnsFailoverActive"
   ]);
 }
 function registerLifecycleListeners2() {

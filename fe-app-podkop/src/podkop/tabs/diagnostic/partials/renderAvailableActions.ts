@@ -8,6 +8,7 @@ import {
   renderPlayIcon24,
   renderRotateCcwIcon24,
   renderSquareChartGanttIcon24,
+  renderCircleXIcon24,
 } from '../../../../icons';
 import { insertIf } from '../../../../helpers';
 
@@ -27,6 +28,7 @@ interface IRenderAvailableActionsProps {
   globalCheck: ActionProps;
   viewLogs: ActionProps;
   showSingBoxConfig: ActionProps;
+  dnsFailoverRetryOriginal: ActionProps;
 }
 
 export function renderAvailableActions({
@@ -38,6 +40,7 @@ export function renderAvailableActions({
   globalCheck,
   viewLogs,
   showSingBoxConfig,
+  dnsFailoverRetryOriginal,
 }: IRenderAvailableActionsProps) {
   return E('div', { class: 'pdk_diagnostic-page__right-bar__actions' }, [
     E('b', {}, _('Available actions')),
@@ -116,6 +119,16 @@ export function renderAvailableActions({
         text: _('Show sing-box config'),
         loading: showSingBoxConfig.loading,
         disabled: showSingBoxConfig.disabled,
+      }),
+    ]),
+    ...insertIf(dnsFailoverRetryOriginal.visible, [
+      renderButton({
+        classNames: ['cbi-button-action'],
+        onClick: dnsFailoverRetryOriginal.onClick,
+        icon: renderCircleXIcon24,
+        text: _('Restore original DNS'),
+        loading: dnsFailoverRetryOriginal.loading,
+        disabled: dnsFailoverRetryOriginal.disabled,
       }),
     ]),
   ]);

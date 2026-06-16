@@ -66,6 +66,8 @@ export namespace Podkop {
     CHECK_LOGS = 'check_logs',
     GET_SYSTEM_INFO = 'get_system_info',
     SUBSCRIPTION_UPDATE = 'subscription_update',
+    DNS_FAILOVER_RETRY_ORIGINAL = 'dns_failover_retry_original',
+    GET_SUBSCRIPTION_USERINFO = 'get_subscription_userinfo',
   }
 
   export enum AvailableClashAPIMethods {
@@ -174,6 +176,17 @@ export namespace Podkop {
     bootstrap_dns_server: string;
     bootstrap_dns_status: 0 | 1;
     dhcp_config_status: 0 | 1;
+    dns_failover_active: 0 | 1;
+    dns_failover_original_type: string;
+    dns_failover_original_server: string;
+  }
+
+  export interface SubscriptionUserinfo {
+    section: string;
+    upload: number;
+    download: number;
+    total: number;
+    expire: number;
   }
 
   export interface NftRulesCheckResult {

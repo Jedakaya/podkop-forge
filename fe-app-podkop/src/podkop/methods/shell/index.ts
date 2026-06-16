@@ -95,4 +95,12 @@ export const PodkopShellMethods = {
       '/usr/bin/podkop',
       90000,
     ),
+  dnsFailoverRetryOriginal: async () =>
+    callBaseMethod<{ result: string }>(
+      Podkop.AvailableMethods.DNS_FAILOVER_RETRY_ORIGINAL,
+    ),
+  getSubscriptionUserinfo: async () =>
+    callBaseMethod<Podkop.SubscriptionUserinfo[]>(
+      Podkop.AvailableMethods.GET_SUBSCRIPTION_USERINFO,
+    ),
 };

@@ -273,6 +273,44 @@ async function handleViewLogs() {
   }
 }
 
+async function handleDnsFailoverRetryOriginal() {
+  const diagnosticsActions = store.get().diagnosticsActions;
+  store.set({
+    diagnosticsActions: {
+      ...diagnosticsActions,
+      dnsFailoverRetryOriginal: { loading: true },
+    },
+  });
+
+  try {
+    const result = await PodkopShellMethods.dnsFailoverRetryOriginal();
+
+    if (result.success) {
+      const res = (result.data as { result: string }).result;
+      if (res === 'reverted') {
+        store.set({ dnsFailoverActive: false });
+        showToast(_('Original DNS restored successfully'), 'success');
+      } else if (res === 'still_unreachable') {
+        showToast(_('Original DNS is still unreachable'), 'error');
+      } else {
+        showToast(_('No active DNS failover'), 'info');
+      }
+    } else {
+      showToast(_('Failed to execute!'), 'error');
+    }
+  } catch (e) {
+    logger.error('[DIAGNOSTIC]', 'handleDnsFailoverRetryOriginal - e', e);
+    showToast(_('Failed to execute!'), 'error');
+  } finally {
+    store.set({
+      diagnosticsActions: {
+        ...store.get().diagnosticsActions,
+        dnsFailoverRetryOriginal: { loading: false },
+      },
+    });
+  }
+}
+
 async function handleShowSingBoxConfig() {
   const diagnosticsActions = store.get().diagnosticsActions;
   store.set({
@@ -351,6 +389,8 @@ function renderDiagnosticAvailableActionsWidget() {
     diagnosticsActions.start.loading ||
     diagnosticsActions.stop.loading;
 
+  const dnsFailoverActive = store.get().dnsFailoverActive;
+
   const container = document.getElementById('pdk_diagnostic-page-actions');
 
   const renderedActions = renderAvailableActions({
@@ -401,6 +441,12 @@ function renderDiagnosticAvailableActionsWidget() {
       visible: true,
       onClick: handleShowSingBoxConfig,
       disabled: atLeastOneServiceCommandLoading,
+    },
+    dnsFailoverRetryOriginal: {
+      loading: diagnosticsActions.dnsFailoverRetryOriginal.loading,
+      visible: dnsFailoverActive,
+      onClick: handleDnsFailoverRetryOriginal,
+      disabled: atLeastOneServiceCommandLoading || diagnosticsActions.dnsFailoverRetryOriginal.loading,
     },
   });
 
@@ -509,7 +555,7 @@ async function onStoreUpdate(
     renderDiagnosticRunActionWidget();
   }
 
-  if (diff.diagnosticsActions || diff.servicesInfoWidget) {
+  if (diff.diagnosticsActions || diff.servicesInfoWidget || diff.dnsFailoverActive) {
     renderDiagnosticAvailableActionsWidget();
   }
 
@@ -580,6 +626,7 @@ function onPageUnmount() {
     'diagnosticsSystemInfo',
     'diagnosticsChecks',
     'diagnosticsRunAction',
+    'dnsFailoverActive',
   ]);
 }
 
