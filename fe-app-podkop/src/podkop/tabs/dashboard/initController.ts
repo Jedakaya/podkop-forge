@@ -41,7 +41,7 @@ async function fetchDashboardSections() {
 
   store.set({
     sectionsWidget: {
-      latencyFetching: false,
+      ...store.get().sectionsWidget,
       loading: false,
       failed: !success,
       data,

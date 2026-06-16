@@ -1823,6 +1823,18 @@ var SocketManager = class _SocketManager {
 };
 var socket = SocketManager.getInstance();
 
+// src/helpers/prettyBytes.ts
+function prettyBytes(n) {
+  const UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+  if (n < 1e3) {
+    return n + " B";
+  }
+  const exponent = Math.min(Math.floor(Math.log10(n) / 3), UNITS.length - 1);
+  n = Number((n / Math.pow(1e3, exponent)).toPrecision(3));
+  const unit = UNITS[exponent];
+  return n + " " + unit;
+}
+
 // src/podkop/tabs/dashboard/partials/renderSections.ts
 function renderFailedState() {
   return E(
@@ -1852,6 +1864,19 @@ function renderExpiryBadge(userinfo) {
     return E("span", { style: badgeStyle(color) }, label);
   }
   return E("span", { style: badgeStyle("#27ae60") }, "\u221E");
+}
+function renderTrafficBadge(userinfo) {
+  if (userinfo.download === 0 && userinfo.total === 0) {
+    return "";
+  }
+  const badgeStyle = `margin-left:8px;font-size:11px;font-weight:400;color:#3498db;background:#3498db1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`;
+  const down = prettyBytes(userinfo.download);
+  if (userinfo.total > 0) {
+    const total = prettyBytes(userinfo.total);
+    const pct = Math.round(userinfo.download / userinfo.total * 100);
+    return E("span", { style: badgeStyle }, `\u2193 ${down} / ${total} (${pct}%)`);
+  }
+  return E("span", { style: badgeStyle }, `\u2193 ${down}`);
 }
 function renderDefaultState({
   section,
@@ -1914,7 +1939,11 @@ function renderDefaultState({
         {
           class: "pdk_dashboard-page__outbound-section__title-section__title"
         },
-        [section.displayName, userinfo ? renderExpiryBadge(userinfo) : ""]
+        [
+          section.displayName,
+          userinfo ? renderExpiryBadge(userinfo) : "",
+          userinfo ? renderTrafficBadge(userinfo) : ""
+        ]
       ),
       E("div", { style: "display: flex; gap: 8px" }, [
         section.isSubscription ? subscriptionUpdating ? E("div", {
@@ -2073,18 +2102,6 @@ function render() {
   );
 }
 
-// src/helpers/prettyBytes.ts
-function prettyBytes(n) {
-  const UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
-  if (n < 1e3) {
-    return n + " B";
-  }
-  const exponent = Math.min(Math.floor(Math.log10(n) / 3), UNITS.length - 1);
-  n = Number((n / Math.pow(1e3, exponent)).toPrecision(3));
-  const unit = UNITS[exponent];
-  return n + " " + unit;
-}
-
 // src/helpers/showToast.ts
 function showToast(message, type, duration = 3e3) {
   let container = document.querySelector(".toast-container");
@@ -2150,7 +2167,7 @@ async function fetchDashboardSections() {
   }
   store.set({
     sectionsWidget: {
-      latencyFetching: false,
+      ...store.get().sectionsWidget,
       loading: false,
       failed: !success,
       data,

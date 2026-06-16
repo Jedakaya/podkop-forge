@@ -52,6 +52,23 @@ function renderExpiryBadge(userinfo: Podkop.SubscriptionUserinfo) {
   return E('span', { style: badgeStyle('#27ae60') }, '∞');
 }
 
+function renderTrafficBadge(userinfo: Podkop.SubscriptionUserinfo) {
+  if (userinfo.download === 0 && userinfo.total === 0) {
+    return '';
+  }
+
+  const badgeStyle = `margin-left:8px;font-size:11px;font-weight:400;color:#3498db;background:#3498db1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`;
+  const down = prettyBytes(userinfo.download);
+
+  if (userinfo.total > 0) {
+    const total = prettyBytes(userinfo.total);
+    const pct = Math.round((userinfo.download / userinfo.total) * 100);
+    return E('span', { style: badgeStyle }, `↓ ${down} / ${total} (${pct}%)`);
+  }
+
+  return E('span', { style: badgeStyle }, `↓ ${down}`);
+}
+
 export function renderDefaultState({
   section,
   onChooseOutbound,
@@ -122,7 +139,11 @@ export function renderDefaultState({
         {
           class: 'pdk_dashboard-page__outbound-section__title-section__title',
         },
-        [section.displayName, userinfo ? renderExpiryBadge(userinfo) : ''],
+        [
+          section.displayName,
+          userinfo ? renderExpiryBadge(userinfo) : '',
+          userinfo ? renderTrafficBadge(userinfo) : '',
+        ],
       ),
       E('div', { style: 'display: flex; gap: 8px' }, [
         section.isSubscription
