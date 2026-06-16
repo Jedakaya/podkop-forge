@@ -246,7 +246,7 @@ async function renderSectionsWidget() {
       latencyFetching: sectionsWidget.latencyFetching,
       subscriptionUpdating: sectionsWidget.subscriptionUpdating,
       userinfo: sectionsWidget.subscriptionUserinfo.find(
-        (u) => u.section === section.code,
+        (u) => u.section === section.displayName,
       ),
       onTestLatency: (tag) => {
         if (section.withTagSelect) {
