@@ -85,6 +85,12 @@ export async function runDnsCheck() {
           key: `${_('Subscription')} [${sub.section}] ${_('expires')}`,
           value: `${formatExpiry(sub.expire)} (${label})`,
         });
+      } else {
+        subscriptionItems.push({
+          state: 'success',
+          key: `${_('Subscription')} [${sub.section}] ${_('expires')}`,
+          value: `∞`,
+        });
       }
       if (sub.total > 0) {
         const used = sub.upload + sub.download;

@@ -49,15 +49,7 @@ function renderExpiryBadge(userinfo: Podkop.SubscriptionUserinfo) {
     return E('span', { style: badgeStyle(color) }, label);
   }
 
-  const used = userinfo.upload + userinfo.download;
-  if (used > 0) {
-    const label = userinfo.total > 0
-      ? `${prettyBytes(used)} / ${prettyBytes(userinfo.total)}`
-      : `↓ ${prettyBytes(userinfo.download)}`;
-    return E('span', { style: badgeStyle('#888') }, label);
-  }
-
-  return '';
+  return E('span', { style: badgeStyle('#27ae60') }, '∞');
 }
 
 export function renderDefaultState({
