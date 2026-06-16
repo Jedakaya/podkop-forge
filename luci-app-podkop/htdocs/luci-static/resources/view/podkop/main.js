@@ -1823,6 +1823,18 @@ var SocketManager = class _SocketManager {
 };
 var socket = SocketManager.getInstance();
 
+// src/helpers/prettyBytes.ts
+function prettyBytes(n) {
+  const UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+  if (n < 1e3) {
+    return n + " B";
+  }
+  const exponent = Math.min(Math.floor(Math.log10(n) / 3), UNITS.length - 1);
+  n = Number((n / Math.pow(1e3, exponent)).toPrecision(3));
+  const unit = UNITS[exponent];
+  return n + " " + unit;
+}
+
 // src/podkop/tabs/dashboard/partials/renderSections.ts
 function renderFailedState() {
   return E(
@@ -1842,15 +1854,21 @@ function renderLoadingState() {
   });
 }
 function renderExpiryBadge(userinfo) {
-  if (userinfo.expire <= 0) return "";
-  const now = Math.floor(Date.now() / 1e3);
-  const daysLeft = Math.floor((userinfo.expire - now) / 86400);
-  const expired = daysLeft < 0;
-  const label = expired ? _("Expired") : daysLeft === 0 ? _("Today") : `${daysLeft}d`;
-  const color = expired ? "#e74c3c" : daysLeft < 7 ? "#e67e22" : "#27ae60";
-  return E("span", {
-    style: `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`
-  }, label);
+  const badgeStyle = (color) => `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`;
+  if (userinfo.expire > 0) {
+    const now = Math.floor(Date.now() / 1e3);
+    const daysLeft = Math.floor((userinfo.expire - now) / 86400);
+    const expired = daysLeft < 0;
+    const label = expired ? _("Expired") : daysLeft === 0 ? _("Today") : `${daysLeft}d`;
+    const color = expired ? "#e74c3c" : daysLeft < 7 ? "#e67e22" : "#27ae60";
+    return E("span", { style: badgeStyle(color) }, label);
+  }
+  const used = userinfo.upload + userinfo.download;
+  if (used > 0) {
+    const label = userinfo.total > 0 ? `${prettyBytes(used)} / ${prettyBytes(userinfo.total)}` : `\u2193 ${prettyBytes(userinfo.download)}`;
+    return E("span", { style: badgeStyle("#888") }, label);
+  }
+  return "";
 }
 function renderDefaultState({
   section,
@@ -2070,18 +2088,6 @@ function render() {
       )
     ]
   );
-}
-
-// src/helpers/prettyBytes.ts
-function prettyBytes(n) {
-  const UNITS = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
-  if (n < 1e3) {
-    return n + " B";
-  }
-  const exponent = Math.min(Math.floor(Math.log10(n) / 3), UNITS.length - 1);
-  n = Number((n / Math.pow(1e3, exponent)).toPrecision(3));
-  const unit = UNITS[exponent];
-  return n + " " + unit;
 }
 
 // src/helpers/showToast.ts
@@ -2786,6 +2792,12 @@ async function runDnsCheck() {
           state: trafficState,
           key: `${_("Subscription")} [${sub.section}] ${_("traffic")}`,
           value: `${formatBytes(used)} / ${formatBytes(sub.total)} (${pct}%)`
+        });
+      } else if (sub.download > 0) {
+        subscriptionItems.push({
+          state: "success",
+          key: `${_("Subscription")} [${sub.section}] ${_("traffic")}`,
+          value: `\u2193 ${formatBytes(sub.download)}`
         });
       }
     }

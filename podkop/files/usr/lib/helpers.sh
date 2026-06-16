@@ -700,7 +700,7 @@ save_subscription_userinfo() {
     total="${total:-0}"
     expire="${expire:-0}"
 
-    [ "$expire" -eq 0 ] && [ "$total" -eq 0 ] && return 0
+    [ "$expire" -eq 0 ] && [ "$total" -eq 0 ] && [ "$upload" -eq 0 ] && [ "$dl" -eq 0 ] && return 0
 
     local userinfo_out tmpfile
     userinfo_out="$SUBSCRIPTION_CACHE_FOLDER/${section}.userinfo"

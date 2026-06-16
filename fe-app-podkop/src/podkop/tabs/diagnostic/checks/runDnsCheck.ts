@@ -96,6 +96,12 @@ export async function runDnsCheck() {
           key: `${_('Subscription')} [${sub.section}] ${_('traffic')}`,
           value: `${formatBytes(used)} / ${formatBytes(sub.total)} (${pct}%)`,
         });
+      } else if (sub.download > 0) {
+        subscriptionItems.push({
+          state: 'success',
+          key: `${_('Subscription')} [${sub.section}] ${_('traffic')}`,
+          value: `↓ ${formatBytes(sub.download)}`,
+        });
       }
     }
   }

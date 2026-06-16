@@ -1,4 +1,5 @@
 import { Podkop } from '../../../types';
+import { prettyBytes } from '../../../../helpers/prettyBytes';
 
 interface IRenderSectionsProps {
   loading: boolean;
@@ -32,19 +33,31 @@ function renderLoadingState() {
 }
 
 function renderExpiryBadge(userinfo: Podkop.SubscriptionUserinfo) {
-  if (userinfo.expire <= 0) return '';
-  const now = Math.floor(Date.now() / 1000);
-  const daysLeft = Math.floor((userinfo.expire - now) / 86400);
-  const expired = daysLeft < 0;
-  const label = expired
-    ? _('Expired')
-    : daysLeft === 0
-      ? _('Today')
-      : `${daysLeft}d`;
-  const color = expired ? '#e74c3c' : daysLeft < 7 ? '#e67e22' : '#27ae60';
-  return E('span', {
-    style: `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`,
-  }, label);
+  const badgeStyle = (color: string) =>
+    `margin-left:8px;font-size:11px;font-weight:400;color:${color};background:${color}1a;border-radius:4px;padding:1px 6px;vertical-align:middle;white-space:nowrap`;
+
+  if (userinfo.expire > 0) {
+    const now = Math.floor(Date.now() / 1000);
+    const daysLeft = Math.floor((userinfo.expire - now) / 86400);
+    const expired = daysLeft < 0;
+    const label = expired
+      ? _('Expired')
+      : daysLeft === 0
+        ? _('Today')
+        : `${daysLeft}d`;
+    const color = expired ? '#e74c3c' : daysLeft < 7 ? '#e67e22' : '#27ae60';
+    return E('span', { style: badgeStyle(color) }, label);
+  }
+
+  const used = userinfo.upload + userinfo.download;
+  if (used > 0) {
+    const label = userinfo.total > 0
+      ? `${prettyBytes(used)} / ${prettyBytes(userinfo.total)}`
+      : `↓ ${prettyBytes(userinfo.download)}`;
+    return E('span', { style: badgeStyle('#888') }, label);
+  }
+
+  return '';
 }
 
 export function renderDefaultState({
