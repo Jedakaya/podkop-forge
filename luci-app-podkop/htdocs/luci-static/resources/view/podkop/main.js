@@ -4383,7 +4383,7 @@ async function handleDnsFailoverRetryOriginal() {
       } else if (res === "still_unreachable") {
         showToast(_("Original DNS is still unreachable"), "error");
       } else {
-        showToast(_("No active DNS failover"), "info");
+        showToast(_("No active DNS failover"), "success");
       }
     } else {
       showToast(_("Failed to execute!"), "error");
