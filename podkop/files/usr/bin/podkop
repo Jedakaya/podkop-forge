@@ -664,6 +664,15 @@ dns_health_check() {
     config_get dns_type "settings" "dns_type"
     config_get dns_server "settings" "dns_server"
 
+    local dns_host="${dns_server%%/*}"
+    case "$dns_host" in
+        127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
+            log "DNS health check: $dns_server is a local/private address, skipping failover" "debug"
+            rm -f "$DNS_FAILOVER_FAILURE_FILE"
+            return 0
+            ;;
+    esac
+
     if dns_failover_probe_dns "$dns_type" "$dns_server"; then
         rm -f "$DNS_FAILOVER_FAILURE_FILE"
         log "DNS health check: $dns_type/$dns_server is reachable" "debug"
