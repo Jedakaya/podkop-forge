@@ -847,9 +847,20 @@ sing_box_cm_set_xhttp_transport_for_outbound() {
     local mode="$5"
     local extra_json="$6"
 
-    local x_padding_bytes="" xmux_json="{}"
+    local x_padding_bytes="" x_padding_key="" x_padding_header="" x_padding_method="" x_padding_placement="" uplink_method="" xmux_json="{}"
+    local x_padding_obfs_mode=""
     if [ -n "$extra_json" ] && [ "$extra_json" != "null" ]; then
-        x_padding_bytes=$(printf '%s' "$extra_json" | jq -r 'if .xPaddingBytes != null then .xPaddingBytes else "" end' 2>/dev/null)
+        x_padding_bytes=$(printf '%s' "$extra_json" | jq -r '
+            if .xPaddingBytes != null then .xPaddingBytes
+            elif ((.xPaddingKey // .xPaddingHeader // .xPaddingMethod // .xPaddingObfsMode) != null) then "100-1000"
+            else "" end
+        ' 2>/dev/null)
+        x_padding_key=$(printf '%s' "$extra_json" | jq -r '.xPaddingKey // ""' 2>/dev/null)
+        x_padding_header=$(printf '%s' "$extra_json" | jq -r '.xPaddingHeader // ""' 2>/dev/null)
+        x_padding_method=$(printf '%s' "$extra_json" | jq -r '.xPaddingMethod // ""' 2>/dev/null)
+        x_padding_placement=$(printf '%s' "$extra_json" | jq -r '.xPaddingPlacement // ""' 2>/dev/null)
+        x_padding_obfs_mode=$(printf '%s' "$extra_json" | jq -r 'if .xPaddingObfsMode == true then "true" else "" end' 2>/dev/null)
+        uplink_method=$(printf '%s' "$extra_json" | jq -r '.uplinkHTTPMethod // ""' 2>/dev/null)
 
         xmux_json=$(printf '%s' "$extra_json" | jq -c '
             (.xmux // {}) as $x | {}
@@ -867,7 +878,13 @@ sing_box_cm_set_xhttp_transport_for_outbound() {
         --arg path "$path" \
         --arg host "$host" \
         --arg mode "$mode" \
+        --arg uplink_method "$uplink_method" \
         --arg x_padding_bytes "$x_padding_bytes" \
+        --arg x_padding_key "$x_padding_key" \
+        --arg x_padding_header "$x_padding_header" \
+        --arg x_padding_method "$x_padding_method" \
+        --arg x_padding_placement "$x_padding_placement" \
+        --arg x_padding_obfs_mode "$x_padding_obfs_mode" \
         --argjson xmux "$xmux_json" \
         '.outbounds |= map(
             if .tag == $tag then
@@ -877,7 +894,13 @@ sing_box_cm_set_xhttp_transport_for_outbound() {
                         + (if $path != "" then {path: $path} else {} end)
                         + (if $host != "" then {host: $host} else {} end)
                         + (if $mode != "" then {mode: $mode} else {} end)
+                        + (if $uplink_method != "" then {uplink_http_method: $uplink_method} else {} end)
                         + (if $x_padding_bytes != "" then {x_padding_bytes: $x_padding_bytes} else {} end)
+                        + (if $x_padding_key != "" then {x_padding_key: $x_padding_key} else {} end)
+                        + (if $x_padding_header != "" then {x_padding_header: $x_padding_header} else {} end)
+                        + (if $x_padding_method != "" then {x_padding_method: $x_padding_method} else {} end)
+                        + (if $x_padding_placement != "" then {x_padding_placement: $x_padding_placement} else {} end)
+                        + (if $x_padding_obfs_mode != "" then {x_padding_obfs_mode: true} else {} end)
                         + (if ($xmux | length) > 0 then {xmux: $xmux} else {} end)
                     )
                 }

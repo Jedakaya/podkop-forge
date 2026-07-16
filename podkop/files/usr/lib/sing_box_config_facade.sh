@@ -633,9 +633,12 @@ _sing_box_cf_add_subscription_outbounds_from_xray_config_list() {
         # same safety net used for the other subscription formats.
         validation_tmp="$(mktemp)"
         sing_box_cm_save_config_to_file "$updated_config" "$validation_tmp"
-        if ! sing-box -c "$validation_tmp" check > /dev/null 2>&1; then
+        local check_err check_rc
+        check_err=$(sing-box -c "$validation_tmp" check 2>&1)
+        check_rc=$?
+        if [ "$check_rc" -ne 0 ]; then
             rm -f "$validation_tmp"
-            log "Skip unsupported subscription server for current sing-box: '$display_name'" "warn"
+            log "Skip unsupported subscription server for current sing-box: '$display_name': $check_err" "warn"
             continue
         fi
         rm -f "$validation_tmp"
@@ -768,11 +771,16 @@ _xray_set_outbound_security_for_outbound() {
         config=$(sing_box_cm_set_tls_for_outbound "$config" "$tag" "$sni" "" "null" "$fingerprint" "$public_key" "$short_id")
         ;;
     tls)
-        local sni fingerprint alpn insecure
+        local sni fingerprint alpn insecure network
         sni=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.tlsSettings.serverName // ""' 2>/dev/null)
         fingerprint=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.tlsSettings.fingerprint // ""' 2>/dev/null)
         alpn=$(printf '%s' "$outbound_json" | jq -c '.streamSettings.tlsSettings.alpn // null' 2>/dev/null)
         insecure=$(printf '%s' "$outbound_json" | jq -r 'if .streamSettings.tlsSettings.allowInsecure == true then "1" else "" end' 2>/dev/null)
+        network=$(printf '%s' "$outbound_json" | jq -r '.streamSettings.network // ""' 2>/dev/null)
+        # xhttp uses HTTP/2 framing — h3 (QUIC/UDP) is incompatible and causes timeouts
+        if [ "$network" = "xhttp" ]; then
+            alpn=$(printf '%s' "$alpn" | jq -c 'if . != null then [.[] | select(. != "h3")] | if . == [] then null else . end else null end' 2>/dev/null)
+        fi
 
         config=$(sing_box_cm_set_tls_for_outbound "$config" "$tag" "$sni" "$([ "$insecure" = "1" ] && echo true)" "$alpn" "$fingerprint" "" "")
         ;;
