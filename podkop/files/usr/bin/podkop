@@ -35,7 +35,7 @@ config_load "$PODKOP_CONFIG"
 
 PODKOP_LOCK_FILE="/var/run/podkop.lock"
 DNS_FAILOVER_FAILURE_FILE="/var/run/podkop_dns_failover_failures"
-DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 udp:8.8.8.8"
+DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 udp:8.8.8.8 wan:auto"
 
 # Serializes start/stop/restart/reload/subscription_update so that an
 # interface-up triggered reload (e.g. BadWAN monitoring) cannot tear down
@@ -605,6 +605,21 @@ dns_failover_wan_is_up() {
     ip route 2>/dev/null | grep -q "^default"
 }
 
+# Returns the first DNS server advertised via DHCP on the active WAN interface.
+# Used as a last-resort fallback when all public DNS resolvers are blocked (e.g.
+# cellular carrier that blocks 8.8.8.8/1.1.1.1 but provides its own resolver).
+get_wan_dns_from_dhcp() {
+    local wan_dev dns
+    wan_dev=$(ip route show default 2>/dev/null | awk '/^default/ {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
+    [ -z "$wan_dev" ] && return 1
+    dns=$(ubus call network.interface dump 2>/dev/null | jq -r \
+        --arg dev "$wan_dev" \
+        '.interface[] | select((.l3_device == $dev or .device == $dev) and (."dns-server" | length) > 0) | ."dns-server"[0]' \
+        2>/dev/null | head -1)
+    [ -n "$dns" ] && echo "$dns" && return 0
+    return 1
+}
+
 dns_failover_activate() {
     local dns_failover_active dns_failover_index
     config_get_bool dns_failover_active "settings" "dns_failover_active" 0
@@ -638,6 +653,23 @@ dns_failover_activate() {
     if [ "$found" -eq 0 ]; then
         log "DNS failover: all fallback DNS options exhausted" "error"
         return 1
+    fi
+
+    # wan:auto — resolve the actual carrier DNS from the WAN interface DHCP lease
+    if [ "$fallback_type" = "wan" ] && [ "$fallback_server" = "auto" ]; then
+        local auto_dns
+        auto_dns=$(get_wan_dns_from_dhcp)
+        if [ -z "$auto_dns" ]; then
+            log "DNS failover: wan:auto — could not detect WAN DHCP DNS, all fallbacks exhausted" "error"
+            return 1
+        fi
+        if ! dns_failover_probe_dns "udp" "$auto_dns"; then
+            log "DNS failover: wan:auto — WAN DHCP DNS $auto_dns is unreachable, all fallbacks exhausted" "error"
+            return 1
+        fi
+        log "DNS failover: wan:auto resolved to $auto_dns" "info"
+        fallback_type="udp"
+        fallback_server="$auto_dns"
     fi
 
     local cur_type cur_server
