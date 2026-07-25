@@ -692,6 +692,12 @@ sing_box_cm_add_hysteria2_outbound() {
     local download_mbps="$9"
     local network="${10}"
 
+    # Detect multi-port: comma-separated or hyphen-range (e.g. "443,8000-9000")
+    local is_multi_port=0
+    case "$server_port" in
+        *,*|*-*) is_multi_port=1 ;;
+    esac
+
     echo "$config" | jq \
         --arg tag "$tag" \
         --arg server_address "$server_address" \
@@ -702,14 +708,23 @@ sing_box_cm_add_hysteria2_outbound() {
         --arg upload_mbps "$upload_mbps" \
         --arg download_mbps "$download_mbps" \
         --arg network "$network" \
+        --argjson is_multi_port "$is_multi_port" \
         '.outbounds += [(
         {
           type: "hysteria2",
           tag: $tag,
           server: $server_address,
-          server_port: ($server_port | tonumber),
           password: $password
         }
+        + (if $is_multi_port == 1 then
+            {server_ports: ($server_port | split(",") | map(
+                if test("-") then
+                    (split("-") | "\(.[0]):\(.[1])")
+                else . end
+            ))}
+           else
+            {server_port: ($server_port | tonumber)}
+           end)
         + (if $obfuscator_type != "" and $obfuscator_password != "" then {
             obfs: {
                 type: $obfuscator_type,

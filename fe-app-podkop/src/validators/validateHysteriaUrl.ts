@@ -54,13 +54,31 @@ export function validateHysteria2Url(url: string): ValidationResult {
     }
 
     const cleanedPort = port.replace('/', '');
-    const portNum = Number(cleanedPort);
 
-    if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
-      return {
-        valid: false,
-        message: _('Invalid HY2 URL: invalid port number'),
-      };
+    // Accept single port, comma-separated ports, or hyphen-ranges (port hopping)
+    const isMultiPort = /[,\-]/.test(cleanedPort);
+    if (isMultiPort) {
+      const parts = cleanedPort.split(',');
+      for (const part of parts) {
+        const range = part.split('-');
+        for (const p of range) {
+          const n = Number(p.trim());
+          if (!Number.isInteger(n) || n < 1 || n > 65535) {
+            return {
+              valid: false,
+              message: _('Invalid HY2 URL: invalid port number in range'),
+            };
+          }
+        }
+      }
+    } else {
+      const portNum = Number(cleanedPort);
+      if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+        return {
+          valid: false,
+          message: _('Invalid HY2 URL: invalid port number'),
+        };
+      }
     }
 
     if (queryString) {

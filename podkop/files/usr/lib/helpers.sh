@@ -755,6 +755,15 @@ download_subscription() {
     kernel_version="$(get_kernel_version)"
     hwid="$(generate_hwid)"
 
+    local insecure_curl="" insecure_wget=""
+    local subscription_insecure_flag
+    config_get_bool subscription_insecure_flag "$section" "subscription_insecure" 0
+    if [ "$subscription_insecure_flag" -eq 1 ]; then
+        insecure_curl="-k"
+        insecure_wget="--no-check-certificate"
+        log "Subscription download: TLS verification disabled for section '$section'" "debug"
+    fi
+
     local tmpfile errfile hdrfile rc family
     tmpfile="${filepath}.part.$$"
     errfile="${filepath}.err.$$"
@@ -767,6 +776,7 @@ download_subscription() {
             family="ipv4"
             if [ -n "$http_proxy_address" ]; then
                 curl -4 -s -S --max-time "$timeout" \
+                    ${insecure_curl:+$insecure_curl} \
                     -x "http://$http_proxy_address" \
                     -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
@@ -780,6 +790,7 @@ download_subscription() {
                     "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
+                    ${insecure_wget:+$insecure_wget} \
                     --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
@@ -792,6 +803,7 @@ download_subscription() {
         else
             if [ -n "$http_proxy_address" ]; then
                 curl -s -S --max-time "$timeout" \
+                    ${insecure_curl:+$insecure_curl} \
                     -x "http://$http_proxy_address" \
                     -H "User-Agent: $user_agent" \
                     -H "X-HWID: $hwid" \
@@ -805,6 +817,7 @@ download_subscription() {
                     "$url" 2>"$errfile"
             else
                 wget -T "$timeout" -O "$tmpfile" \
+                    ${insecure_wget:+$insecure_wget} \
                     --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \

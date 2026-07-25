@@ -36,6 +36,8 @@ config_load "$PODKOP_CONFIG"
 PODKOP_LOCK_FILE="/var/run/podkop.lock"
 DNS_FAILOVER_FAILURE_FILE="/var/run/podkop_dns_failover_failures"
 DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 udp:8.8.8.8 wan:auto"
+SING_BOX_MONITOR_PID_FILE="/var/run/podkop_monitor.pid"
+SING_BOX_MONITOR_STOP_MARKER="/var/run/podkop_monitor_stop"
 
 # Serializes start/stop/restart/reload/subscription_update so that an
 # interface-up triggered reload (e.g. BadWAN monitoring) cannot tear down
@@ -46,6 +48,49 @@ acquire_lifecycle_lock() {
         log "Waiting for another podkop start/stop/restart/reload to finish" "info"
         flock 9
     fi
+}
+
+# Remove a UCI option silently — no error if it doesn't exist
+uci_remove_quiet() {
+    uci_remove "$@" 2>/dev/null || true
+}
+
+# Background loop: restarts sing-box if it unexpectedly stops.
+# Waits 30 s between checks; uses exponential backoff after each restart.
+# Exits immediately when SING_BOX_MONITOR_STOP_MARKER is present.
+_sing_box_monitor_loop() {
+    local backoff=10
+    while true; do
+        sleep 30
+        [ -f "$SING_BOX_MONITOR_STOP_MARKER" ] && return
+        if ! pgrep "sing-box" > /dev/null 2>&1; then
+            log "sing-box monitor: process not running — restarting (backoff ${backoff}s)" "warn"
+            /etc/init.d/sing-box start
+            sleep "$backoff"
+            backoff=$(( backoff * 2 > 300 ? 300 : backoff * 2 ))
+        else
+            backoff=10
+        fi
+    done
+}
+
+start_sing_box_monitor() {
+    stop_sing_box_monitor
+    rm -f "$SING_BOX_MONITOR_STOP_MARKER"
+    _sing_box_monitor_loop &
+    echo $! > "$SING_BOX_MONITOR_PID_FILE"
+    log "sing-box monitor started (PID $!)" "debug"
+}
+
+stop_sing_box_monitor() {
+    local pid
+    touch "$SING_BOX_MONITOR_STOP_MARKER"
+    pid=$(cat "$SING_BOX_MONITOR_PID_FILE" 2>/dev/null)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        log "sing-box monitor stopped (PID $pid)" "debug"
+    fi
+    rm -f "$SING_BOX_MONITOR_PID_FILE"
 }
 
 check_requirements() {
@@ -848,6 +893,7 @@ start_main() {
     config_foreach add_subscription_cron_job "section"
     add_dns_health_check_cron_job
     /etc/init.d/sing-box start
+    start_sing_box_monitor
 
     if [ "$subscription_startup_blocked" -ne 0 ]; then
         start_subscription_startup_retry_worker
@@ -861,6 +907,7 @@ start_main() {
 stop_main() {
     log "Stopping the podkop"
 
+    stop_sing_box_monitor
     stop_subscription_startup_retry_worker
 
     if [ -f /var/run/podkop_list_update.pid ]; then
@@ -877,9 +924,7 @@ stop_main() {
     rm -f "$TMP_RULESET_FOLDER"/*
 
     log "Flush nft"
-    if nft list table inet "$NFT_TABLE_NAME" > /dev/null 2>&1; then
-        nft delete table inet "$NFT_TABLE_NAME"
-    fi
+    nft_delete_table "$NFT_TABLE_NAME"
 
     log "Flush ip rule"
     if ip rule list | grep -q "podkop"; then
@@ -1039,6 +1084,9 @@ create_nft_rules() {
     nft add chain inet "$NFT_TABLE_NAME" mangle '{ type filter hook prerouting priority -150; policy accept; }'
     nft add chain inet "$NFT_TABLE_NAME" mangle_output '{ type route hook output priority -150; policy accept; }'
     nft add chain inet "$NFT_TABLE_NAME" proxy '{ type filter hook prerouting priority -100; policy accept; }'
+
+    # Let already-DNAT'd connections (port forwarding) bypass tproxy marking
+    nft add rule inet "$NFT_TABLE_NAME" mangle ct status dnat return
 
     nft add rule inet "$NFT_TABLE_NAME" mangle iifname "@$NFT_INTERFACE_SET_NAME" ip daddr "@$NFT_COMMON_SET_NAME" meta l4proto tcp meta mark set "$NFT_FAKEIP_MARK" counter
     nft add rule inet "$NFT_TABLE_NAME" mangle iifname "@$NFT_INTERFACE_SET_NAME" ip daddr "@$NFT_COMMON_SET_NAME" meta l4proto udp meta mark set "$NFT_FAKEIP_MARK" counter
