@@ -172,8 +172,17 @@ main() {
 
     if [ -f "/etc/init.d/podkop" ]; then
         msg "Podkop is already installed. Upgrading..."
+        # For an upgrade we only remove old packages if there is not enough free space.
+        # opkg/apk can upgrade in-place when space is available, so avoid unnecessary removal.
+        if ! check_available_space; then
+            msg "Недостаточно места — удаляю старые пакеты podkop, чтобы освободить пространство..."
+            uninstall_podkop_packages
+            check_available_space || exit 1
+            msg "Место освобождено, продолжаю..."
+        fi
     else
         msg "Installing podkop..."
+        check_available_space || exit 1
     fi
 
     if command -v curl >/dev/null 2>&1; then
@@ -272,6 +281,36 @@ main() {
     find "$DOWNLOAD_DIR" -type f -name '*podkop*' -exec rm {} \;
 }
 
+REQUIRED_SPACE=15360 # 15MB in KB
+
+# Returns 0 if /overlay has enough free space, 1 otherwise.
+# Prints available/required only on failure.
+check_available_space() {
+    local avail
+    avail=$(df /overlay | awk 'NR==2 {print $4}')
+    if [ "$avail" -lt "$REQUIRED_SPACE" ]; then
+        msg "Недостаточно места на флэш-памяти"
+        msg "Доступно: $((avail/1024)) МБ  |  Требуется: $((REQUIRED_SPACE/1024)) МБ"
+        return 1
+    fi
+    return 0
+}
+
+# Removes installed podkop packages to free overlay space before upgrade.
+# Keeps /etc/config/podkop (opkg/apk preserves conffiles by default).
+uninstall_podkop_packages() {
+    msg "Останавливаю podkop перед обновлением..."
+    /usr/bin/podkop stop 2>/dev/null || true
+    sleep 1
+
+    msg "Удаляю старые пакеты podkop чтобы освободить место..."
+    for pkg in luci-i18n-podkop-ru luci-app-podkop podkop; do
+        if pkg_is_installed "$pkg"; then
+            pkg_remove "$pkg" || true
+        fi
+    done
+}
+
 check_system() {
     # Get router model
     MODEL=$(cat /tmp/sysinfo/model)
@@ -283,17 +322,6 @@ check_system() {
         msg "OpenWrt 23.05 не поддерживается начиная с podkop 0.5.0"
         msg "Для OpenWrt 23.05 используйте podkop версии 0.4.11 или устанавливайте зависимости и podkop вручную"
         msg "Подробности: https://podkop.net/docs/install/#%d1%83%d1%81%d1%82%d0%b0%d0%bd%d0%be%d0%b2%d0%ba%d0%b0-%d0%bd%d0%b0-2305"
-        exit 1
-    fi
-
-    # Check available space
-    AVAILABLE_SPACE=$(df /overlay | awk 'NR==2 {print $4}')
-    REQUIRED_SPACE=15360 # 15MB in KB
-
-    if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
-        msg "Error: Insufficient space in flash"
-        msg "Available: $((AVAILABLE_SPACE/1024))MB"
-        msg "Required: $((REQUIRED_SPACE/1024))MB"
         exit 1
     fi
 
