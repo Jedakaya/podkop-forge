@@ -20,6 +20,8 @@ import { PODKOP_LUCI_APP_VERSION } from '../../../constants';
 import { showToast } from '../../../helpers/showToast';
 import { renderWikiDisclaimer } from './partials/renderWikiDisclaimer';
 import { runSectionsCheck } from './checks/runSectionsCheck';
+import { DIAGNOSTICS_CHECKS, DIAGNOSTICS_CHECKS_MAP } from './checks/contstants';
+import { updateCheckStore } from './checks/updateCheckStore';
 
 async function fetchSystemInfo() {
   const systemInfo = await PodkopShellMethods.getSystemInfo();
@@ -564,6 +566,30 @@ async function onStoreUpdate(
   }
 }
 
+// A throwing check must not leave its own card spinning nor abort the checks
+// queued after it.
+async function runCheckSafely(
+  code: DIAGNOSTICS_CHECKS,
+  run: () => Promise<void>,
+) {
+  try {
+    await run();
+  } catch (e) {
+    logger.error('[DIAGNOSTIC]', `runChecks - ${code}`, e);
+
+    const { order, title } = DIAGNOSTICS_CHECKS_MAP[code];
+
+    updateCheckStore({
+      order,
+      code,
+      title,
+      description: _('Failed to execute!'),
+      state: 'error',
+      items: [],
+    });
+  }
+}
+
 async function runChecks() {
   try {
     store.set({
@@ -571,15 +597,15 @@ async function runChecks() {
       diagnosticsChecks: loadingDiagnosticsChecksStore.diagnosticsChecks,
     });
 
-    await runDnsCheck();
+    await runCheckSafely(DIAGNOSTICS_CHECKS.DNS, runDnsCheck);
 
-    await runSingBoxCheck();
+    await runCheckSafely(DIAGNOSTICS_CHECKS.SINGBOX, runSingBoxCheck);
 
-    await runNftCheck();
+    await runCheckSafely(DIAGNOSTICS_CHECKS.NFT, runNftCheck);
 
-    await runSectionsCheck();
+    await runCheckSafely(DIAGNOSTICS_CHECKS.OUTBOUNDS, runSectionsCheck);
 
-    await runFakeIPCheck();
+    await runCheckSafely(DIAGNOSTICS_CHECKS.FAKEIP, runFakeIPCheck);
   } catch (e) {
     logger.error('[DIAGNOSTIC]', 'runChecks - e', e);
   } finally {

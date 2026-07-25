@@ -4664,17 +4664,33 @@ async function onStoreUpdate2(next, prev, diff) {
     renderDiagnosticSystemInfoWidget();
   }
 }
+async function runCheckSafely(code, run) {
+  try {
+    await run();
+  } catch (e) {
+    logger.error("[DIAGNOSTIC]", `runChecks - ${code}`, e);
+    const { order, title } = DIAGNOSTICS_CHECKS_MAP[code];
+    updateCheckStore({
+      order,
+      code,
+      title,
+      description: _("Failed to execute!"),
+      state: "error",
+      items: []
+    });
+  }
+}
 async function runChecks() {
   try {
     store.set({
       diagnosticsRunAction: { loading: true },
       diagnosticsChecks: loadingDiagnosticsChecksStore.diagnosticsChecks
     });
-    await runDnsCheck();
-    await runSingBoxCheck();
-    await runNftCheck();
-    await runSectionsCheck();
-    await runFakeIPCheck();
+    await runCheckSafely("DNS" /* DNS */, runDnsCheck);
+    await runCheckSafely("SINGBOX" /* SINGBOX */, runSingBoxCheck);
+    await runCheckSafely("NFT" /* NFT */, runNftCheck);
+    await runCheckSafely("OUTBOUNDS" /* OUTBOUNDS */, runSectionsCheck);
+    await runCheckSafely("FAKEIP" /* FAKEIP */, runFakeIPCheck);
   } catch (e) {
     logger.error("[DIAGNOSTIC]", "runChecks - e", e);
   } finally {
@@ -5081,7 +5097,7 @@ async function executeShellCommand({
   timeout = COMMAND_TIMEOUT
 }) {
   try {
-    return withTimeout(
+    return await withTimeout(
       fs.exec(command, args),
       timeout,
       [command, ...args].join(" ")

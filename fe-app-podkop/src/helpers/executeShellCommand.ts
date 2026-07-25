@@ -19,7 +19,10 @@ export async function executeShellCommand({
   timeout = COMMAND_TIMEOUT,
 }: ExecuteShellCommandParams): Promise<ExecuteShellCommandResponse> {
   try {
-    return withTimeout(
+    // Must be awaited inside the try: returning the promise unawaited lets a
+    // timeout rejection escape this catch and stall callers stuck in a
+    // "loading" state forever.
+    return await withTimeout(
       fs.exec(command, args),
       timeout,
       [command, ...args].join(' '),
