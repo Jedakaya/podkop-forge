@@ -5,13 +5,6 @@ nft_create_table() {
     nft add table inet "$name"
 }
 
-# Delete an nftables table idempotently (no error if it doesn't exist)
-nft_delete_table() {
-    local name="$1"
-
-    nft delete table inet "$name" 2>/dev/null || true
-}
-
 # Create a set within a table for storing IPv4 addresses
 nft_create_ipv4_set() {
     local table="$1"
@@ -40,7 +33,7 @@ nft_add_set_elements_from_file_chunked() {
     local filepath="$1"
     local nft_table_name="$2"
     local nft_set_name="$3"
-    local chunk_size="${4:-1000}"
+    local chunk_size="${4:-5000}"
 
     local array count
     count=0
