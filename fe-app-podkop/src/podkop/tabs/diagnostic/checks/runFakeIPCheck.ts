@@ -21,19 +21,31 @@ export async function runFakeIPCheck() {
   const checkFakeIPResponse = await RemoteFakeIPMethods.getFakeIpCheck();
   const checkIPResponse = await RemoteFakeIPMethods.getIpCheck();
 
+  // `data` is whatever the call produced — it is an empty string when
+  // check_fakeip printed nothing, and null when the endpoint answered `null`.
+  // Reading `.fakeip` off that directly threw a TypeError and killed the
+  // whole check, so the card never left its "loading" state.
+  const routerData = routerFakeIPResponse.success
+    ? (routerFakeIPResponse.data as { fakeip?: boolean } | null)
+    : null;
+  const browserFakeIPData = checkFakeIPResponse.success
+    ? checkFakeIPResponse.data
+    : null;
+  const browserIPData = checkIPResponse.success ? checkIPResponse.data : null;
+
   const checks = {
-    router: routerFakeIPResponse.success && routerFakeIPResponse.data.fakeip,
-    browserFakeIP:
-      checkFakeIPResponse.success && checkFakeIPResponse.data.fakeip,
-    differentIP:
-      checkFakeIPResponse.success &&
-      checkIPResponse.success &&
-      checkFakeIPResponse.data.IP !== checkIPResponse.data.IP,
+    router: Boolean(routerData?.fakeip),
+    browserFakeIP: Boolean(browserFakeIPData?.fakeip),
+    differentIP: Boolean(
+      browserFakeIPData?.IP &&
+        browserIPData?.IP &&
+        browserFakeIPData.IP !== browserIPData.IP,
+    ),
   };
 
-  const allGood = checks.router || checks.browserFakeIP || checks.differentIP;
+  const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood =
-    checks.router && checks.browserFakeIP && checks.differentIP;
+    checks.router || checks.browserFakeIP || checks.differentIP;
 
   const { state, description } = getMeta({ atLeastOneGood, allGood });
 

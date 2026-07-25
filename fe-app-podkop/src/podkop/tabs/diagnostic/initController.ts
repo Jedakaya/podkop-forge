@@ -578,6 +578,7 @@ async function runCheckSafely(
     logger.error('[DIAGNOSTIC]', `runChecks - ${code}`, e);
 
     const { order, title } = DIAGNOSTICS_CHECKS_MAP[code];
+    const reason = e instanceof Error ? e.message : String(e);
 
     updateCheckStore({
       order,
@@ -585,7 +586,9 @@ async function runCheckSafely(
       title,
       description: _('Failed to execute!'),
       state: 'error',
-      items: [],
+      // Surface the raw reason — an opaque "failed" card is not diagnosable
+      // from a screenshot.
+      items: [{ state: 'error', key: reason, value: '' }],
     });
   }
 }

@@ -3035,13 +3035,18 @@ async function runFakeIPCheck() {
   const routerFakeIPResponse = await PodkopShellMethods.checkFakeIP();
   const checkFakeIPResponse = await RemoteFakeIPMethods.getFakeIpCheck();
   const checkIPResponse = await RemoteFakeIPMethods.getIpCheck();
+  const routerData = routerFakeIPResponse.success ? routerFakeIPResponse.data : null;
+  const browserFakeIPData = checkFakeIPResponse.success ? checkFakeIPResponse.data : null;
+  const browserIPData = checkIPResponse.success ? checkIPResponse.data : null;
   const checks = {
-    router: routerFakeIPResponse.success && routerFakeIPResponse.data.fakeip,
-    browserFakeIP: checkFakeIPResponse.success && checkFakeIPResponse.data.fakeip,
-    differentIP: checkFakeIPResponse.success && checkIPResponse.success && checkFakeIPResponse.data.IP !== checkIPResponse.data.IP
+    router: Boolean(routerData?.fakeip),
+    browserFakeIP: Boolean(browserFakeIPData?.fakeip),
+    differentIP: Boolean(
+      browserFakeIPData?.IP && browserIPData?.IP && browserFakeIPData.IP !== browserIPData.IP
+    )
   };
-  const allGood = checks.router || checks.browserFakeIP || checks.differentIP;
-  const atLeastOneGood = checks.router && checks.browserFakeIP && checks.differentIP;
+  const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
+  const atLeastOneGood = checks.router || checks.browserFakeIP || checks.differentIP;
   const { state, description } = getMeta({ atLeastOneGood, allGood });
   updateCheckStore({
     order,
@@ -4670,13 +4675,16 @@ async function runCheckSafely(code, run) {
   } catch (e) {
     logger.error("[DIAGNOSTIC]", `runChecks - ${code}`, e);
     const { order, title } = DIAGNOSTICS_CHECKS_MAP[code];
+    const reason = e instanceof Error ? e.message : String(e);
     updateCheckStore({
       order,
       code,
       title,
       description: _("Failed to execute!"),
       state: "error",
-      items: []
+      // Surface the raw reason — an opaque "failed" card is not diagnosable
+      // from a screenshot.
+      items: [{ state: "error", key: reason, value: "" }]
     });
   }
 }
