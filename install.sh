@@ -173,12 +173,17 @@ main() {
     if [ -f "/etc/init.d/podkop" ]; then
         msg "Podkop is already installed. Upgrading..."
         # For an upgrade we only remove old packages if there is not enough free space.
-        # opkg/apk can upgrade in-place when space is available, so avoid unnecessary removal.
+        # Packages download to /tmp (RAM), so overlay only needs space for the install delta.
         if ! check_available_space; then
             msg "Недостаточно места — удаляю старые пакеты podkop, чтобы освободить пространство..."
             uninstall_podkop_packages
-            check_available_space || exit 1
-            msg "Место освобождено, продолжаю..."
+            local avail_after
+            avail_after=$(df /overlay | awk 'NR==2 {print $4}')
+            if [ "$avail_after" -lt 3072 ]; then
+                msg "Недостаточно места даже после удаления podkop (доступно: $((avail_after/1024)) МБ)"
+                exit 1
+            fi
+            msg "Место освобождено ($((avail_after/1024)) МБ), продолжаю..."
         fi
     else
         msg "Installing podkop..."
