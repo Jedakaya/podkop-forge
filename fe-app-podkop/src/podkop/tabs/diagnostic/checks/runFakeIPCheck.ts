@@ -65,11 +65,19 @@ export async function runFakeIPCheck() {
     : getMeta({ atLeastOneGood, allGood });
 
   if (testServiceUnreachable) {
+    const local = routerData as {
+      local_fakeip?: boolean;
+      local_fakeip_address?: string;
+    } | null;
+    const localFakeIP = Boolean(local?.local_fakeip);
+
     updateCheckStore({
       order,
       code,
       title,
-      description,
+      description: localFakeIP
+        ? _('Test service unreachable, FakeIP verified locally')
+        : description,
       state,
       items: [
         {
@@ -77,6 +85,13 @@ export async function runFakeIPCheck() {
           key: _('Could not reach the FakeIP test service'),
           value: FAKEIP_CHECK_DOMAIN,
         },
+        ...insertIf<IDiagnosticsChecksItem>(localFakeIP, [
+          {
+            state: 'success',
+            key: _('Sing-box hands out FakeIP addresses'),
+            value: local?.local_fakeip_address ?? '',
+          },
+        ]),
       ],
     });
 

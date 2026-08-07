@@ -3062,18 +3062,27 @@ async function runFakeIPCheck() {
     description: _("FakeIP test service is unreachable, check skipped")
   } : getMeta({ atLeastOneGood, allGood });
   if (testServiceUnreachable) {
+    const local = routerData;
+    const localFakeIP = Boolean(local?.local_fakeip);
     updateCheckStore({
       order,
       code,
       title,
-      description,
+      description: localFakeIP ? _("Test service unreachable, FakeIP verified locally") : description,
       state,
       items: [
         {
           state: "warning",
           key: _("Could not reach the FakeIP test service"),
           value: FAKEIP_CHECK_DOMAIN
-        }
+        },
+        ...insertIf(localFakeIP, [
+          {
+            state: "success",
+            key: _("Sing-box hands out FakeIP addresses"),
+            value: local?.local_fakeip_address ?? ""
+          }
+        ])
       ]
     });
     return;

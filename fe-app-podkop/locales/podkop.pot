@@ -1117,3 +1117,9 @@ msgstr ""
 
 msgid "Could not reach the FakeIP test service"
 msgstr ""
+
+msgid "Test service unreachable, FakeIP verified locally"
+msgstr ""
+
+msgid "Sing-box hands out FakeIP addresses"
+msgstr ""

@@ -3602,21 +3602,39 @@ check_sing_box() {
     echo "{\"sing_box_installed\":$sing_box_installed,\"sing_box_version_ok\":$sing_box_version_ok,\"sing_box_service_exist\":$sing_box_service_exist,\"sing_box_autostart_disabled\":$sing_box_autostart_disabled,\"sing_box_process_running\":$sing_box_process_running,\"sing_box_ports_listening\":$sing_box_ports_listening}" | jq .
 }
 
+# Proves FakeIP is working without involving any external service: ask the
+# router's own sing-box resolver for the test domain and see whether it hands
+# back an address from the FakeIP pool. On networks where DPI resets the TLS
+# handshake to the test service by SNI, this is the only evidence available —
+# and it is evidence about the part that actually matters locally.
+check_fakeip_locally() {
+    local answer
+
+    answer="$(dig @"$SB_DNS_INBOUND_ADDRESS" -p "$SB_DNS_INBOUND_PORT" \
+        "$FAKEIP_TEST_DOMAIN" +short +timeout=3 +tries=1 2> /dev/null |
+        grep -E '^198\.(1[89])\.' | head -n 1)"
+
+    [ -n "$answer" ] && echo "$answer"
+}
+
 check_fakeip() {
-    local body
+    local body local_address
 
     body="$(curl -m 5 -s "https://$FAKEIP_TEST_DOMAIN/check" 2> /dev/null)"
 
     # An empty body used to leave callers unable to tell "FakeIP is broken"
     # from "the test service could not be reached" — two very different
     # verdicts that were both being reported as a failure.
-    if [ -z "$body" ]; then
-        echo '{"fakeip":false,"unreachable":true}' | jq .
-        return 0
-    fi
+    if [ -z "$body" ] || ! printf '%s' "$body" | jq -e . > /dev/null 2>&1; then
+        local_address="$(check_fakeip_locally)"
 
-    if ! printf '%s' "$body" | jq -e . > /dev/null 2>&1; then
-        echo '{"fakeip":false,"unreachable":true}' | jq .
+        if [ -n "$local_address" ]; then
+            jq -nc --arg address "$local_address" \
+                '{fakeip: false, unreachable: true, local_fakeip: true, local_fakeip_address: $address}' | jq .
+        else
+            echo '{"fakeip":false,"unreachable":true,"local_fakeip":false}' | jq .
+        fi
+
         return 0
     fi
 

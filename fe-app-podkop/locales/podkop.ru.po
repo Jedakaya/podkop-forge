@@ -799,3 +799,9 @@ msgstr "Сервис проверки FakeIP недоступен, провер�
 
 msgid "Could not reach the FakeIP test service"
 msgstr "Не удалось связаться с сервисом проверки FakeIP"
+
+msgid "Test service unreachable, FakeIP verified locally"
+msgstr "Сервис проверки недоступен, FakeIP проверен локально"
+
+msgid "Sing-box hands out FakeIP addresses"
+msgstr "Sing-box выдаёт адреса FakeIP"
