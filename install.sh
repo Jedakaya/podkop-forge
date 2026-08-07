@@ -149,6 +149,33 @@ pkg_install() {
     fi
 }
 
+# Dry run of the same transaction. The package manager accounts for the space
+# the currently installed version gives back, which no size comparison of ours
+# can do, and it writes nothing while answering.
+pkg_install_would_succeed() {
+    local pkg_file="$1"
+    local out rc
+
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        out=$(apk add --allow-untrusted --upgrade --simulate "$pkg_file" 2>&1)
+    else
+        out=$(opkg install --noaction "$pkg_file" 2>&1)
+    fi
+    rc=$?
+
+    [ $rc -eq 0 ] && return 0
+
+    # A package manager that does not know the flag must not be read as "this
+    # will not fit". Refusing on that would block every upgrade, which is the
+    # exact failure this dry run was introduced to avoid.
+    if printf '%s' "$out" | grep -qiE 'unrecognized option|invalid option|unknown option|usage:'; then
+        return 0
+    fi
+
+    printf '%s\n' "$out" | head -n 3
+    return 1
+}
+
 # Package-manager scratch space. On most OpenWrt builds /var already points
 # into tmpfs, but not on every one of them, and an index or a cached archive
 # written to the overlay is exactly the transient write that fails first on a
@@ -822,7 +849,7 @@ sing_box_extended_version_from_url() {
 # installer removes sing-box before installing and wants 25 MB free, which on a
 # nearly full router means the old one is gone and the new one does not fit.
 sing_box_extended_upgrade() {
-    local url latest installed tmpfile size_kb avail
+    local url latest installed tmpfile
 
     msg "Проверяю обновления sing-box-extended..."
 
@@ -857,21 +884,25 @@ sing_box_extended_upgrade() {
         esac
     done
 
+    # Straight into RAM. The archive costs nothing on flash, and its size says
+    # nothing useful about the cost of installing it.
     tmpfile="/tmp/sing-box-extended-$latest.$$"
+    msg "Скачиваю пакет в RAM..."
     if ! wget -q -O "$tmpfile" "$url" || [ ! -s "$tmpfile" ]; then
         rm -f "$tmpfile"
         msg "Не удалось скачать sing-box-extended $latest — оставляем установленную $installed."
         return 0
     fi
 
-    # Checked with the package already in RAM, so its real size is known and the
-    # decision is made before anything on flash is touched.
-    size_kb="$(du -k "$tmpfile" 2>/dev/null | awk '{print $1}')"
-    avail="$(overlay_free_kb)"
-    if [ -n "$avail" ] && [ -n "$size_kb" ] && [ "$avail" -lt "$((size_kb + 2048))" ]; then
+    # Comparing the archive size against free space was simply wrong arithmetic:
+    # an upgrade replaces the installed package, so the space it already holds is
+    # reclaimed and the real cost is the difference between versions, not the
+    # weight of the archive. That check refused updates that would have fit.
+    # A dry run makes the package manager answer the question exactly, and it
+    # changes nothing on disk.
+    if ! pkg_install_would_succeed "$tmpfile"; then
         rm -f "$tmpfile"
-        msg "Недостаточно места для обновления sing-box-extended"
-        msg "Доступно: $avail КБ  |  Нужно примерно: $((size_kb + 2048)) КБ"
+        msg "Пробная установка не прошла — вероятно, действительно не хватает места."
         msg "Установленная версия $installed не тронута."
         report_flash_usage
         return 0
