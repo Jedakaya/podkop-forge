@@ -672,30 +672,50 @@ main() {
     maybe_install_client_panel
 }
 
-# ntpd -q keeps retrying until the clock is actually set and has no timeout of
-# its own, so unreachable time servers make it hang forever rather than fail.
-# That is what left the installer sitting silently after upgrading sing-box.
-# Correct time only matters for DoH/DoT certificate validation, so failing to
-# get it is not a reason to stop.
+# Routers without a real-time clock boot at the firmware build date, years off,
+# and every TLS certificate then looks "not yet valid" — which breaks the HTTPS
+# downloads this script depends on. That is what the sync is for.
+clock_is_plausible() {
+    local year
+    year="$(date +%Y 2>/dev/null)"
+
+    case "$year" in
+    '' | *[!0-9]*) return 1 ;;
+    esac
+
+    [ "$year" -ge 2024 ]
+}
+
+# ntpd -q returns only once the clock is actually set and has no timeout of its
+# own, so unreachable time servers hang it forever instead of failing — that is
+# what left the installer sitting silently after upgrading sing-box.
+#
+# The wait is kept where it earns its place: nothing to wait for when the clock
+# is already sane, and bounded when it is not.
 sync_time() {
-    local pid waited=0
+    local pid waited=0 budget=60
 
     [ -x /usr/sbin/ntpd ] || return 0
+    clock_is_plausible && return 0
 
-    msg "Синхронизирую время..."
+    msg "Часы не выставлены, жду синхронизацию времени (до ${budget} с)..."
 
     if command -v timeout >/dev/null 2>&1; then
-        timeout 30 /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+        timeout "$budget" /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
             -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1
     else
         /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
             -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1 &
         pid=$!
-        while [ "$waited" -lt 30 ] && kill -0 "$pid" 2>/dev/null; do
+        while [ "$waited" -lt "$budget" ] && kill -0 "$pid" 2>/dev/null; do
             sleep 1
             waited=$((waited + 1))
         done
         kill "$pid" 2>/dev/null
+    fi
+
+    if ! clock_is_plausible; then
+        msg "Время синхронизировать не удалось — HTTPS-загрузки могут не пройти."
     fi
 
     return 0

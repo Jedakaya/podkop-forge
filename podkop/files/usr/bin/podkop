@@ -542,28 +542,60 @@ prepare_subscription_caches_for_startup() {
     [ "$subscription_startup_blocked" -eq 0 ]
 }
 
+# These routers have no real-time clock, so after a power cut they boot at the
+# firmware build date — years off. Every TLS certificate then looks "not yet
+# valid", which breaks DoH/DoT, the subscription download and the tunnel itself.
+# That is why the clock is synced before anything is built.
+clock_is_plausible() {
+    local year
+    year="$(date +%Y 2>/dev/null)"
+
+    case "$year" in
+    ''|*[!0-9]*) return 1 ;;
+    esac
+
+    [ "$year" -ge 2024 ]
+}
+
 # ntpd -q returns only once the clock has actually been set and carries no
 # timeout of its own, so unreachable time servers block it forever — here, in
-# the middle of the start path, that means podkop never finishes starting.
-# Accurate time only matters for DoH/DoT certificate validation, and starting
-# with a wrong clock beats not starting at all.
+# the middle of the start path, that means podkop never finishes starting, and
+# the recovery worker that exists to fix that calls the very same restart.
+#
+# The wait is therefore kept, but only where it earns its place: when the clock
+# is already sane there is nothing to wait for, and when it is not, the wait is
+# bounded. Starting with a wrong clock leaves a degraded podkop that cron and
+# the recovery worker keep retrying — starting never leaves nothing at all.
 sync_time_bounded() {
-    local pid waited=0
+    local pid waited=0 budget=60
 
     [ -x /usr/sbin/ntpd ] || return 0
 
+    if clock_is_plausible; then
+        log "System clock already set, skipping the blocking time sync" "debug"
+        return 0
+    fi
+
+    log "System clock is not set yet, waiting up to ${budget}s for NTP" "warn"
+
     if command -v timeout > /dev/null 2>&1; then
-        timeout 30 /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+        timeout "$budget" /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
             -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 > /dev/null 2>&1
     else
         /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
             -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 > /dev/null 2>&1 &
         pid=$!
-        while [ "$waited" -lt 30 ] && kill -0 "$pid" 2> /dev/null; do
+        while [ "$waited" -lt "$budget" ] && kill -0 "$pid" 2> /dev/null; do
             sleep 1
             waited=$((waited + 1))
         done
         kill "$pid" 2> /dev/null
+    fi
+
+    if clock_is_plausible; then
+        log "System clock synced" "info"
+    else
+        log "NTP is unreachable; starting with an unsynced clock — TLS to DoH/DoT and the subscription may fail until it is set" "error"
     fi
 
     return 0
