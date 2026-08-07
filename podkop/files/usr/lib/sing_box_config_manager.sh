@@ -1568,6 +1568,24 @@ sing_box_cm_add_ip_port_reject_route_rule() {
     local ports="$4"
     local tag="$5"
 
+    # No address list means "these ports, wherever they go" — which is the only
+    # workable shape for DoT, since it is defined by its port rather than by a
+    # handful of well-known server addresses.
+    if [ -z "$ip_cidr" ] || [ "$ip_cidr" = "[]" ]; then
+        echo "$config" | jq \
+            --arg service_tag "$SERVICE_TAG" \
+            --arg tag "$tag" \
+            --arg inbound "$inbound" \
+            --argjson ports "$ports" \
+            '.route.rules += [{
+                action: "reject",
+                inbound: $inbound,
+                port: $ports,
+                $service_tag: $tag
+            }]'
+        return
+    fi
+
     echo "$config" | jq \
         --arg service_tag "$SERVICE_TAG" \
         --arg tag "$tag" \

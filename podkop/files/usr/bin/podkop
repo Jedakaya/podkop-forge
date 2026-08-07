@@ -2182,7 +2182,15 @@ sing_box_configure_route() {
         doh_block_ips_json="$(printf '%s\n' $DOH_BLOCK_IPS | jq -Rac --slurp 'split("\n") | map(select(length > 0))')"
         config=$(sing_box_cm_add_ip_port_reject_route_rule \
             "$config" "$SB_TPROXY_INBOUND_TAG" "$doh_block_ips_json" '[443]' "$(gen_id)")
-        log "Client DoH endpoints are blocked at the routing level" "info"
+
+        # DoT and DoQ carry nothing but DNS, so port 853 can be cut wholesale
+        # rather than against a list of known addresses. This is what actually
+        # catches Android's "Private DNS", the most common way a phone resolves
+        # names behind the router's back — the 443 list above cannot see it.
+        config=$(sing_box_cm_add_ip_port_reject_route_rule \
+            "$config" "$SB_TPROXY_INBOUND_TAG" "[]" '[853]' "$(gen_id)")
+
+        log "Client DoH and DoT endpoints are blocked at the routing level" "info"
     fi
 
     local first_outbound_section
