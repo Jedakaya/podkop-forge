@@ -35,7 +35,22 @@ config_load "$PODKOP_CONFIG"
 
 PODKOP_LOCK_FILE="/var/run/podkop.lock"
 DNS_FAILOVER_FAILURE_FILE="/var/run/podkop_dns_failover_failures"
-DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 udp:8.8.8.8 wan:auto"
+# Survives podkop restarts but not reboots, which is exactly the lifetime a
+# recovery backoff needs: each failed recovery restart spawns a fresh worker,
+# so without a counter outside the worker the delay would reset every cycle.
+PODKOP_RECOVERY_ATTEMPTS_FILE="/var/run/podkop_recovery_attempts"
+# Encrypted resolvers come first, and they are addressed by IP so they need no
+# bootstrap lookup: when an ISP starts transparently answering port 53, every
+# plain-UDP entry in this list is hijacked exactly like the configured one, so
+# a plain-only list cannot recover from interception.
+DNS_FAILOVER_FALLBACK_LIST="doh:1.1.1.1/dns-query doh:8.8.8.8/dns-query dot:1.1.1.1 udp:77.88.8.8 udp:1.1.1.1 wan:auto"
+DNS_PROBE_DOMAIN="google.com"
+# base64url-encoded DNS wire query for "google.com A", used for RFC 8484 DoH
+# probes: dig on OpenWrt frequently lacks +https support, curl never does.
+DNS_PROBE_WIRE_QUERY="AAABAAABAAAAAAAABmdvb2dsZQNjb20AAAEAAQ"
+# RFC 5737 TEST-NET-1. Nothing routable listens there, so an answer to a query
+# sent to this address proves a middlebox is intercepting port 53.
+DNS_INTERCEPT_CANARY_SERVER="192.0.2.1"
 
 # Serializes start/stop/restart/reload/subscription_update so that an
 # interface-up triggered reload (e.g. BadWAN monitoring) cannot tear down
@@ -523,6 +538,25 @@ prepare_subscription_caches_for_startup() {
     [ "$subscription_startup_blocked" -eq 0 ]
 }
 
+sing_box_is_running() {
+    pgrep "sing-box" > /dev/null 2>&1
+}
+
+# sing-box needs a moment to fork and settle; polling avoids both a fixed sleep
+# and a false "it is down" verdict right after start.
+wait_for_sing_box_running() {
+    local deadline="${1:-15}"
+    local waited=0
+
+    while [ "$waited" -lt "$deadline" ]; do
+        sing_box_is_running && return 0
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    sing_box_is_running
+}
+
 stop_subscription_startup_retry_worker() {
     local pidfile="/var/run/podkop_subscription_retry.pid"
 
@@ -552,8 +586,27 @@ start_subscription_startup_retry_worker() {
         trap 'rm -f "'"$pidfile"'"' EXIT INT TERM
 
         # Let the primary sing-box instance come up first, so a configured
-        # service proxy can be used for the post-bootstrap refresh.
-        sleep 10
+        # service proxy can be used for the post-bootstrap refresh. Repeated
+        # recoveries stretch that pause so a router stuck in a long outage is
+        # not restarted in a tight loop.
+        attempts=0
+        [ -f "$PODKOP_RECOVERY_ATTEMPTS_FILE" ] && attempts="$(cat "$PODKOP_RECOVERY_ATTEMPTS_FILE" 2> /dev/null)"
+        [ -z "$attempts" ] && attempts=0
+        echo "$((attempts + 1))" > "$PODKOP_RECOVERY_ATTEMPTS_FILE"
+
+        initial_wait=10
+        while [ "$attempts" -gt 0 ] && [ "$initial_wait" -lt 300 ]; do
+            initial_wait=$((initial_wait * 2))
+            attempts=$((attempts - 1))
+        done
+        [ "$initial_wait" -gt 300 ] && initial_wait=300
+
+        sleep "$initial_wait"
+
+        # Backoff, so a router that is down for a long outage is not restarted
+        # every 30 seconds for hours. Restarts only ever happen while sing-box
+        # is confirmed dead — a running instance is never disturbed.
+        delay=30
 
         while true; do
             config_load "$PODKOP_CONFIG"
@@ -563,13 +616,26 @@ start_subscription_startup_retry_worker() {
             # Keep diagnostics visible in syslog; subscription URLs are redacted
             # in the lower-level download helpers.
             if /usr/bin/podkop subscription_update; then
-                log "Deferred subscription refresh succeeded; updated configuration is being applied" "info"
+                if sing_box_is_running; then
+                    log "Deferred subscription refresh succeeded; updated configuration is being applied" "info"
+                    rm -f "$pidfile"
+                    exit 0
+                fi
+
+                # The subscription was fine, so whatever is keeping sing-box
+                # down is not going to be fixed by refreshing it again. An
+                # "unchanged" subscription short-circuits before any restart,
+                # which is exactly how a dead router stayed dead.
+                log "Subscription is current but sing-box is still down; restarting podkop" "error"
+                /usr/bin/podkop restart
                 rm -f "$pidfile"
                 exit 0
             fi
 
-            log "Deferred subscription refresh has not completed yet; retrying in background" "warn"
-            sleep 30
+            log "Deferred subscription refresh has not completed yet; retrying in ${delay}s" "warn"
+            sleep "$delay"
+            [ "$delay" -lt 300 ] && delay=$((delay * 2))
+            [ "$delay" -gt 300 ] && delay=300
         done
     ) &
 
@@ -577,28 +643,55 @@ start_subscription_startup_retry_worker() {
     log "Started deferred startup recovery worker with PID $!" "warn"
 }
 
+# True when the argument contains at least one plain IPv4 literal. A resolver
+# that exits 0 while answering nothing (SERVFAIL, empty NOERROR, a truncated
+# hijack page) is dead for our purposes, so the answer body decides, not the
+# exit code.
+dns_answer_has_ipv4() {
+    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'
+}
+
 dns_failover_probe_dns() {
     local dns_type="$1"
     local dns_server="$2"
-    local domain="google.com"
+    local domain="$DNS_PROBE_DOMAIN"
+    local answer doh_path doh_host
 
     case "$dns_type" in
     doh)
-        local doh_path="/dns-query"
-        local doh_host="$dns_server"
+        doh_path="/dns-query"
+        doh_host="$dns_server"
         if echo "$dns_server" | grep -q "/"; then
             doh_path="/$(echo "$dns_server" | cut -d'/' -f2-)"
             doh_host="$(echo "$dns_server" | cut -d'/' -f1)"
         fi
-        dig @"$doh_host" "$domain" +https="$doh_path" +timeout=3 +tries=1 > /dev/null 2>&1
+        # RFC 8484 GET. A DoH endpoint that is reachable and healthy answers
+        # 200 with an application/dns-message body.
+        curl -s -m 5 -o /dev/null -f \
+            -H "accept: application/dns-message" \
+            "https://${doh_host}${doh_path}?dns=${DNS_PROBE_WIRE_QUERY}" > /dev/null 2>&1
+        return $?
         ;;
     dot)
-        dig @"$dns_server" "$domain" +tls +timeout=3 +tries=1 > /dev/null 2>&1
+        answer="$(dig @"$dns_server" "$domain" +tls +short +timeout=3 +tries=1 2> /dev/null)"
         ;;
-    udp|*)
-        dig @"$dns_server" "$domain" +timeout=3 +tries=1 > /dev/null 2>&1
+    udp | *)
+        answer="$(dig @"$dns_server" "$domain" +short +timeout=3 +tries=1 2> /dev/null)"
         ;;
     esac
+
+    dns_answer_has_ipv4 "$answer"
+}
+
+# An ISP that transparently redirects port 53 answers queries aimed at any
+# address, including one that cannot exist. When that happens the configured
+# resolver still looks perfectly healthy while returning whatever the ISP
+# wants, which is how a working-looking 8.8.8.8 took the whole network down.
+dns_plain_port53_intercepted() {
+    local answer
+    answer="$(dig @"$DNS_INTERCEPT_CANARY_SERVER" "$DNS_PROBE_DOMAIN" +short +timeout=2 +tries=1 2> /dev/null)"
+
+    dns_answer_has_ipv4 "$answer"
 }
 
 dns_failover_wan_is_up() {
@@ -621,6 +714,7 @@ get_wan_dns_from_dhcp() {
 }
 
 dns_failover_activate() {
+    local intercepted="${1:-0}"
     local dns_failover_active dns_failover_index
     config_get_bool dns_failover_active "settings" "dns_failover_active" 0
     config_get dns_failover_index "settings" "dns_failover_index" "0"
@@ -639,10 +733,20 @@ dns_failover_activate() {
         log "DNS failover: saving original DNS: type=$orig_type server=$orig_server" "info"
     fi
 
-    local i=0 fallback_type fallback_server found=0
+    local i=0 fallback_type fallback_server found=0 entry_type
     for entry in $DNS_FAILOVER_FALLBACK_LIST; do
+        entry_type="${entry%%:*}"
+
+        # Cleartext resolvers are pointless while port 53 is being answered by
+        # a middlebox: every one of them would pass the reachability probe and
+        # keep serving the censor's answers.
+        if [ "$intercepted" = "1" ] && { [ "$entry_type" = "udp" ] || [ "$entry_type" = "wan" ]; }; then
+            i=$((i + 1))
+            continue
+        fi
+
         if [ "$i" -ge "$dns_failover_index" ]; then
-            fallback_type="${entry%%:*}"
+            fallback_type="$entry_type"
             fallback_server="${entry##*:}"
             found=1
             break
@@ -705,10 +809,25 @@ dns_health_check() {
             ;;
     esac
 
+    local intercepted=0
     if dns_failover_probe_dns "$dns_type" "$dns_server"; then
-        rm -f "$DNS_FAILOVER_FAILURE_FILE"
-        log "DNS health check: $dns_type/$dns_server is reachable" "debug"
-        return 0
+        if [ "$dns_type" != "udp" ] && [ -n "$dns_type" ]; then
+            rm -f "$DNS_FAILOVER_FAILURE_FILE"
+            log "DNS health check: $dns_type/$dns_server is reachable" "debug"
+            return 0
+        fi
+
+        # Plain DNS answered — which proves nothing while a middlebox is
+        # answering on behalf of every resolver. Only the canary can tell the
+        # two apart.
+        if ! dns_plain_port53_intercepted; then
+            rm -f "$DNS_FAILOVER_FAILURE_FILE"
+            log "DNS health check: $dns_type/$dns_server is reachable" "debug"
+            return 0
+        fi
+
+        intercepted=1
+        log "DNS health check: $dns_server answers, but port 53 is intercepted upstream — its answers cannot be trusted" "warn"
     fi
 
     if ! dns_failover_wan_is_up; then
@@ -723,12 +842,16 @@ dns_health_check() {
     failures=$((failures + 1))
     echo "$failures" > "$DNS_FAILOVER_FAILURE_FILE"
 
-    log "DNS health check: $dns_type/$dns_server unreachable, WAN up [$failures/3]" "warn"
+    if [ "$intercepted" -eq 1 ]; then
+        log "DNS health check: $dns_type/$dns_server hijacked, WAN up [$failures/3]" "warn"
+    else
+        log "DNS health check: $dns_type/$dns_server unreachable, WAN up [$failures/3]" "warn"
+    fi
 
     if [ "$failures" -ge 3 ]; then
         log "DNS health check: 3 consecutive failures, triggering failover" "warn"
         acquire_lifecycle_lock
-        dns_failover_activate
+        dns_failover_activate "$intercepted"
     fi
 }
 
@@ -842,15 +965,33 @@ start_main() {
     create_nft_rules
     sing_box_configure_service
 
-    # sing-box
-    sing_box_init_config
+    # Cron jobs are installed before the configuration is generated on purpose.
+    # They are the only unattended path back to a working router, and a startup
+    # that died while building the config used to skip them entirely — leaving
+    # no subscription refresh and no DNS health check to ever recover.
     config_foreach add_cron_job "section"
     config_foreach add_subscription_cron_job "section"
     add_dns_health_check_cron_job
+
+    # sing-box
+    local sing_box_config_rc=0
+    sing_box_init_config || sing_box_config_rc=$?
+
     /etc/init.d/sing-box start
 
-    if [ "$subscription_startup_blocked" -ne 0 ]; then
+    local needs_recovery=0
+    [ "$subscription_startup_blocked" -ne 0 ] && needs_recovery=1
+    [ "$sing_box_config_rc" -ne 0 ] && needs_recovery=1
+
+    if ! wait_for_sing_box_running 15; then
+        log "sing-box did not come up after start — arming background recovery" "error"
+        needs_recovery=1
+    fi
+
+    if [ "$needs_recovery" -ne 0 ]; then
         start_subscription_startup_retry_worker
+    else
+        rm -f "$PODKOP_RECOVERY_ATTEMPTS_FILE"
     fi
 
     log "Nice"
@@ -2480,7 +2621,25 @@ sing_box_save_config() {
     log "Save sing-box temporary config to $temp_file_path" "debug"
     sing_box_cm_save_config_to_file "$config" "$temp_file_path"
 
-    sing_box_config_check "$temp_file_path"
+    if ! sing_box_config_check "$temp_file_path"; then
+        sing-box -c "$temp_file_path" check 2>&1 | head -n 5 | while IFS= read -r check_error; do
+            log "sing-box check: $check_error" "error"
+        done
+        rm -f "$temp_file_path"
+
+        # Refusing to install a broken configuration must never mean refusing
+        # to run. A generated config can be rejected for reasons entirely
+        # outside the router's control — a subscription that came back mangled
+        # while DNS was hijacked, for one — and aborting the whole startup left
+        # every client without internet until someone intervened by hand.
+        if [ -s "$sing_box_config_path" ]; then
+            log "Keeping the last known good sing-box configuration and scheduling recovery" "error"
+            return 3
+        fi
+
+        log "There is no previous sing-box configuration to fall back to" "error"
+        return 1
+    fi
 
     current_config_hash=$(md5sum "$sing_box_config_path" 2> /dev/null | awk '{print $1}')
     temp_config_hash=$(md5sum "$temp_file_path" | awk '{print $1}')
@@ -2499,9 +2658,11 @@ sing_box_config_check() {
     local config_path="$1"
 
     if ! sing-box -c "$config_path" check > /dev/null 2>&1; then
-        log "Sing-box configuration $config_path is invalid. Aborted." "fatal"
-        exit 1
+        log "Sing-box configuration $config_path is invalid" "error"
+        return 1
     fi
+
+    return 0
 }
 
 import_community_subnet_lists() {
@@ -3225,26 +3386,17 @@ check_dns_available() {
         display_dns_server="dns.nextdns.io/$masked_path"
     fi
 
-    if [ "$dns_type" = "doh" ]; then
-        # Check if dns_server already contains a path
-        local doh_path="/dns-query"
-        if echo "$dns_server" | grep -q "/"; then
-            # Path is already present, extract it
-            doh_path="/$(echo "$dns_server" | cut -d'/' -f2-)"
-            dns_server="$(echo "$dns_server" | cut -d'/' -f1)"
-        fi
+    # Shares the failover probe so the page cannot report a resolver as healthy
+    # while the health check considers it dead — the two used to disagree
+    # because this one accepted any exit code as success.
+    if dns_failover_probe_dns "$dns_type" "$dns_server"; then
+        dns_status=1
+    fi
 
-        if dig @"$dns_server" "$domain" +https="$doh_path" +timeout=2 +tries=1 > /dev/null 2>&1; then
-            dns_status=1
-        fi
-    elif [ "$dns_type" = "dot" ]; then
-        if dig @"$dns_server" "$domain" +tls +timeout=2 +tries=1 > /dev/null 2>&1; then
-            dns_status=1
-        fi
-    elif [ "$dns_type" = "udp" ]; then
-        if dig @"$dns_server" "$domain" +timeout=2 +tries=1 > /dev/null 2>&1; then
-            dns_status=1
-        fi
+    # A hijacked resolver answers everything, so "reachable" is not "trustworthy".
+    local dns_intercepted=0
+    if dns_plain_port53_intercepted; then
+        dns_intercepted=1
     fi
 
     # Check if local DNS resolver is working
@@ -3269,7 +3421,7 @@ check_dns_available() {
     config_get dns_failover_original_type "settings" "dns_failover_original_type" ""
     config_get dns_failover_original_server "settings" "dns_failover_original_server" ""
 
-    echo "{\"dns_type\":\"$dns_type\",\"dns_server\":\"$display_dns_server\",\"dns_status\":$dns_status,\"dns_on_router\":$dns_on_router,\"bootstrap_dns_server\":\"$bootstrap_dns_server\",\"bootstrap_dns_status\":$bootstrap_dns_status,\"dhcp_config_status\":$dhcp_config_status,\"dns_failover_active\":$dns_failover_active,\"dns_failover_original_type\":\"${dns_failover_original_type:-}\",\"dns_failover_original_server\":\"${dns_failover_original_server:-}\"}" | jq .
+    echo "{\"dns_type\":\"$dns_type\",\"dns_server\":\"$display_dns_server\",\"dns_status\":$dns_status,\"dns_on_router\":$dns_on_router,\"bootstrap_dns_server\":\"$bootstrap_dns_server\",\"bootstrap_dns_status\":$bootstrap_dns_status,\"dhcp_config_status\":$dhcp_config_status,\"dns_failover_active\":$dns_failover_active,\"dns_failover_original_type\":\"${dns_failover_original_type:-}\",\"dns_failover_original_server\":\"${dns_failover_original_server:-}\",\"dns_intercepted\":$dns_intercepted}" | jq .
 }
 
 check_dhcp_has_podkop_dns() {

@@ -179,6 +179,7 @@ export namespace Podkop {
     dns_failover_active: 0 | 1;
     dns_failover_original_type: string;
     dns_failover_original_server: string;
+    dns_intercepted?: 0 | 1;
   }
 
   export interface SubscriptionUserinfo {

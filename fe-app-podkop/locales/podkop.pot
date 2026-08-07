@@ -1105,3 +1105,9 @@ msgstr ""
 #: ../luci-app-podkop/htdocs/luci-static/resources/view/podkop/settings.js:127
 msgid "You can select Output Network Interface, by default autodetect"
 msgstr ""
+
+msgid "Port 53 is intercepted by the provider"
+msgstr ""
+
+msgid "Plain DNS answers cannot be trusted, use DoH or DoT"
+msgstr ""

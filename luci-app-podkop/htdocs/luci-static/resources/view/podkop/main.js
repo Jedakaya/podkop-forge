@@ -2852,6 +2852,13 @@ async function runDnsCheck() {
         key: _("DHCP has DNS server"),
         value: ""
       },
+      ...insertIf(Boolean(data.dns_intercepted), [
+        {
+          state: "warning",
+          key: _("Port 53 is intercepted by the provider"),
+          value: _("Plain DNS answers cannot be trusted, use DoH or DoT")
+        }
+      ]),
       ...insertIf(Boolean(data.dns_failover_active), [
         {
           state: "warning",
