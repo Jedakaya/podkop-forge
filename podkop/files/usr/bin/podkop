@@ -542,6 +542,33 @@ prepare_subscription_caches_for_startup() {
     [ "$subscription_startup_blocked" -eq 0 ]
 }
 
+# ntpd -q returns only once the clock has actually been set and carries no
+# timeout of its own, so unreachable time servers block it forever — here, in
+# the middle of the start path, that means podkop never finishes starting.
+# Accurate time only matters for DoH/DoT certificate validation, and starting
+# with a wrong clock beats not starting at all.
+sync_time_bounded() {
+    local pid waited=0
+
+    [ -x /usr/sbin/ntpd ] || return 0
+
+    if command -v timeout > /dev/null 2>&1; then
+        timeout 30 /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 > /dev/null 2>&1
+    else
+        /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 > /dev/null 2>&1 &
+        pid=$!
+        while [ "$waited" -lt 30 ] && kill -0 "$pid" 2> /dev/null; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+        kill "$pid" 2> /dev/null
+    fi
+
+    return 0
+}
+
 sing_box_is_running() {
     pgrep "sing-box" > /dev/null 2>&1
 }
@@ -984,7 +1011,7 @@ start_main() {
     br_netfilter_disable
 
     # Sync time for DoH/DoT
-    /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123
+    sync_time_bounded
 
     sleep 1
 

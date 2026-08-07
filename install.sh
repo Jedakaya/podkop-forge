@@ -540,7 +540,7 @@ main() {
 
     sing_box
 
-    /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123
+    sync_time
 
     pkg_list_update || { echo "Packages list update failed"; exit 1; }
 
@@ -670,6 +670,35 @@ main() {
     # Last, and never fatal: podkop itself is already installed and verified by
     # this point, so nothing about the panel may put that at risk.
     maybe_install_client_panel
+}
+
+# ntpd -q keeps retrying until the clock is actually set and has no timeout of
+# its own, so unreachable time servers make it hang forever rather than fail.
+# That is what left the installer sitting silently after upgrading sing-box.
+# Correct time only matters for DoH/DoT certificate validation, so failing to
+# get it is not a reason to stop.
+sync_time() {
+    local pid waited=0
+
+    [ -x /usr/sbin/ntpd ] || return 0
+
+    msg "Синхронизирую время..."
+
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 30 /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1
+    else
+        /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1 &
+        pid=$!
+        while [ "$waited" -lt 30 ] && kill -0 "$pid" 2>/dev/null; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+        kill "$pid" 2>/dev/null
+    fi
+
+    return 0
 }
 
 overlay_free_kb() {
