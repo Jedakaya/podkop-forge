@@ -917,12 +917,85 @@ sing_box_extended_upgrade() {
     msg "Устанавливаю sing-box-extended $latest..."
     if pkg_install "$tmpfile"; then
         msg "sing-box-extended обновлён: $installed -> $latest"
-    else
-        msg "Обновление sing-box-extended не удалось — установленная версия осталась на месте."
+        rm -f "$tmpfile"
+        return 0
     fi
 
+    msg "Обновление не прошло — установленная версия $installed осталась на месте."
+
+    # apk unpacks the new binary next to the old one and only then swaps them,
+    # so an upgrade in place needs room for the whole new version, not for the
+    # difference between them. A dry run does not catch this: it plans the
+    # transaction without checking free space.
+    if ! sing_box_extended_out_of_space; then
+        rm -f "$tmpfile"
+        return 0
+    fi
+
+    local reclaim_kb avail_kb
+    reclaim_kb="$(du -k /usr/bin/sing-box 2>/dev/null | awk '{print $1}')"
+    avail_kb="$(overlay_free_kb)"
+    [ -z "$reclaim_kb" ] && reclaim_kb=0
+
+    msg ""
+    msg "Причина — нехватка места на флэш-памяти."
+    msg "Сейчас свободно: ${avail_kb:-?} КБ. Текущий бинарник sing-box занимает $reclaim_kb КБ."
+    msg "Он распаковывается рядом со старым, поэтому места нужно под весь новый размер,"
+    msg "а не под разницу версий — на месте обновление не поместится."
+    msg ""
+    msg "Если сначала удалить старый, освободится $reclaim_kb КБ и станет доступно"
+    msg "около $((${avail_kb:-0} + reclaim_kb)) КБ. Новая версия близка по размеру, то есть шанс хороший,"
+    msg "но точный размер до распаковки неизвестен."
+    msg ""
+    msg "РИСК: если установка после удаления не пройдёт, роутер останется без sing-box"
+    msg "и весь трафик перестанет ходить, пока вы не установите его вручную."
+    msg "Пакет уже скачан в RAM, поэтому окно риска — только сама установка."
+    msg "Удалить старый и поставить новый? y/n"
+
+    while true; do
+        if ! read -r -p '' SBX_FORCE; then
+            msg "Ответ не получен — ничего не трогаем."
+            rm -f "$tmpfile"
+            return 0
+        fi
+        case "$SBX_FORCE" in
+        y|Y) break ;;
+        n|N)
+            msg "Оставляем $installed. Освободите место и повторите позже."
+            report_flash_usage
+            rm -f "$tmpfile"
+            return 0
+            ;;
+        *) echo "Введите y или n" ;;
+        esac
+    done
+
+    msg "Останавливаю podkop и удаляю старый sing-box-extended..."
+    /etc/init.d/podkop stop >/dev/null 2>&1
+    pkg_remove sing-box-extended >/dev/null 2>&1 || pkg_remove sing-box >/dev/null 2>&1
+
+    msg "Устанавливаю $latest..."
+    if pkg_install "$tmpfile"; then
+        msg "sing-box-extended обновлён: $installed -> $latest"
+    else
+        msg ""
+        msg "УСТАНОВКА НЕ ПРОШЛА, И СТАРЫЙ SING-BOX УЖЕ УДАЛЁН."
+        msg "Пакет сохранён: /tmp/sing-box-extended-$latest.apk"
+        msg "Поставьте вручную:  apk add --allow-untrusted /tmp/sing-box-extended-$latest.apk"
+        msg "Файл лежит в RAM и не переживёт перезагрузку — не перезагружайтесь до установки."
+        cp "$tmpfile" "/tmp/sing-box-extended-$latest.apk" 2>/dev/null
+    fi
+
+    /etc/init.d/podkop start >/dev/null 2>&1
     rm -f "$tmpfile"
     return 0
+}
+
+# True when the last package operation failed for lack of disk space rather
+# than for any other reason.
+sing_box_extended_out_of_space() {
+    [ -n "$(overlay_free_kb)" ] || return 1
+    [ "$(overlay_free_kb)" -lt 30720 ]
 }
 
 sing_box() {
