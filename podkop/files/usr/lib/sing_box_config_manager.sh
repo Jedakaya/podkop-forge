@@ -1547,3 +1547,38 @@ _normalize_arg() {
         printf '%s' "$value" | jq -R .
     fi
 }
+
+#######################################
+# Add a reject rule matching a set of destination IPs on the given ports.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   inbound: string, inbound tag the rule applies to
+#   ip_cidr: string (JSON array), destination addresses to reject
+#   ports: string (JSON array), destination ports to reject
+#   tag: string, rule tag for diagnostics
+# Outputs:
+#   Writes updated JSON configuration to stdout
+# Example:
+#   CONFIG=$(sing_box_cm_add_ip_port_reject_route_rule "$CONFIG" "tproxy-in" '["1.1.1.1"]' '[443]' "doh-block")
+#######################################
+sing_box_cm_add_ip_port_reject_route_rule() {
+    local config="$1"
+    local inbound="$2"
+    local ip_cidr="$3"
+    local ports="$4"
+    local tag="$5"
+
+    echo "$config" | jq \
+        --arg service_tag "$SERVICE_TAG" \
+        --arg tag "$tag" \
+        --arg inbound "$inbound" \
+        --argjson ip_cidr "$ip_cidr" \
+        --argjson ports "$ports" \
+        '.route.rules += [{
+            action: "reject",
+            inbound: $inbound,
+            ip_cidr: $ip_cidr,
+            port: $ports,
+            $service_tag: $tag
+        }]'
+}

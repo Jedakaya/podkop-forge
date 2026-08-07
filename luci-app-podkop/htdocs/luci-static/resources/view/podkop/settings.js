@@ -271,6 +271,15 @@ function createSettingsContent(section) {
   o.rmempty = false;
 
   o = section.option(
+    form.Flag,
+    "block_client_doh",
+    _("Блокировать DoH у клиентов"),
+    _("Отрезает известные публичные DoH-серверы на 443 порту для устройств в LAN. Клиент с DoH, прописанным в браузере вручную, резолвит имена мимо роутера — FakeIP не выдаёт адрес, и сайты перестают идти через туннель незаметно. Собственный DoH роутера правило не затрагивает."),
+  );
+  o.default = "0";
+  o.rmempty = false;
+
+  o = section.option(
     form.ListValue,
     "update_interval",
     _("List Update Frequency"),

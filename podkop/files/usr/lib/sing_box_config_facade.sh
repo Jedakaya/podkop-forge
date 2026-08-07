@@ -401,17 +401,100 @@ sing_box_cf_add_subscription_outbounds() {
         return 1
     fi
 
+    # Parsers must run in this shell, not a command substitution: they publish
+    # their results through globals, which a subshell would silently discard.
+    local parser_rc=0
     case "$(detect_subscription_format "$subscription_path")" in
     link-list)
-        _sing_box_cf_add_subscription_outbounds_from_link_list "$config" "$section" "$subscription_path"
+        _sing_box_cf_add_subscription_outbounds_from_link_list "$config" "$section" "$subscription_path" > /dev/null || parser_rc=$?
         ;;
     xray-config-list)
-        _sing_box_cf_add_subscription_outbounds_from_xray_config_list "$config" "$section" "$subscription_path"
+        _sing_box_cf_add_subscription_outbounds_from_xray_config_list "$config" "$section" "$subscription_path" > /dev/null || parser_rc=$?
         ;;
     *)
-        _sing_box_cf_add_subscription_outbounds_from_json "$config" "$section" "$subscription_path"
+        _sing_box_cf_add_subscription_outbounds_from_json "$config" "$section" "$subscription_path" > /dev/null || parser_rc=$?
         ;;
     esac
+
+    _sing_box_cf_filter_subscription_outbounds "$section"
+
+    echo "$SING_BOX_CF_LAST_CONFIG"
+    return "$parser_rc"
+}
+
+#######################################
+# Narrows the outbound list a parser just produced to the servers the section
+# actually wants, using case-insensitive substring keywords on the display name
+# — the text shown in the dashboard, not the internal tag.
+#
+# Filtered-out servers stay in the configuration as unreferenced outbounds; they
+# simply never enter the urltest/selector groups, so nothing routes through them
+# and nothing can break by their mere presence.
+#
+# A filter matching nothing is deliberately ignored rather than honoured: an
+# empty server list means no connectivity at all, and one mistyped keyword must
+# not be able to take a client's tunnel down.
+# Arguments:
+#   section: string, the UCI section name
+# Outputs:
+#   Rewrites SUBSCRIPTION_OUTBOUND_TAGS, SUBSCRIPTION_OUTBOUND_TAGS_JSON and
+#   SUBSCRIPTION_OUTBOUND_NAMES in place when a filter applies.
+#######################################
+_sing_box_cf_filter_subscription_outbounds() {
+    local section="$1"
+    local include exclude filtered kept_count total_count
+
+    config_get include "$section" "subscription_include" ""
+    config_get exclude "$section" "subscription_exclude" ""
+
+    [ -z "$include" ] && [ -z "$exclude" ] && return 0
+    [ -z "$SUBSCRIPTION_OUTBOUND_TAGS" ] && return 0
+
+    filtered="$(
+        printf '%s\n' "$SUBSCRIPTION_OUTBOUND_NAMES" | awk \
+            -v tags="$SUBSCRIPTION_OUTBOUND_TAGS" -v inc="$include" -v exc="$exclude" '
+        BEGIN {
+            tag_count = split(tags, tag_list, ",")
+            inc_count = split(tolower(inc), inc_list, ",")
+            exc_count = split(tolower(exc), exc_list, ",")
+        }
+        NR <= tag_count {
+            name = tolower($0)
+            keep = (inc == "") ? 1 : 0
+
+            for (i = 1; i <= inc_count; i++) {
+                keyword = inc_list[i]
+                gsub(/^[ \t]+|[ \t]+$/, "", keyword)
+                if (keyword != "" && index(name, keyword) > 0) keep = 1
+            }
+
+            for (i = 1; i <= exc_count; i++) {
+                keyword = exc_list[i]
+                gsub(/^[ \t]+|[ \t]+$/, "", keyword)
+                if (keyword != "" && index(name, keyword) > 0) keep = 0
+            }
+
+            if (keep) print tag_list[NR] "\t" $0
+        }'
+    )"
+
+    kept_count="$(printf '%s' "$filtered" | grep -c . 2> /dev/null)"
+    [ -z "$kept_count" ] && kept_count=0
+    total_count="$(printf '%s\n' "$SUBSCRIPTION_OUTBOUND_NAMES" | grep -c . 2> /dev/null)"
+
+    if [ "$kept_count" -eq 0 ]; then
+        log "Subscription filter for section '$section' matched no servers out of $total_count; ignoring the filter" "warn"
+        return 0
+    fi
+
+    SUBSCRIPTION_OUTBOUND_TAGS="$(printf '%s\n' "$filtered" | cut -f1 | tr '\n' ',' | sed 's/,$//')"
+    SUBSCRIPTION_OUTBOUND_NAMES="$(printf '%s\n' "$filtered" | cut -f2-)"
+    SUBSCRIPTION_OUTBOUND_TAGS_JSON="$(
+        printf '%s\n' "$filtered" | cut -f1 |
+            jq -Rac --slurp 'split("\n") | map(select(length > 0))'
+    )"
+
+    log "Subscription filter for section '$section' kept $kept_count of $total_count servers" "info"
 }
 
 #######################################

@@ -68,3 +68,11 @@ SUBNETS_OVH="${GITHUB_RAW_URL}/Subnets/IPv4/ovh.lst"
 SUBNETS_DIGITALOCEAN="${GITHUB_RAW_URL}/Subnets/IPv4/digitalocean.lst"
 SUBNETS_CLOUDFRONT="${GITHUB_RAW_URL}/Subnets/IPv4/cloudfront.lst"
 COMMUNITY_SERVICES="russia_inside russia_outside ukraine_inside geoblock block porn news anime youtube hdrezka tiktok google_ai google_play hodca discord meta twitter cloudflare cloudfront digitalocean hetzner ovh telegram roblox"
+
+# Well-known public DoH resolver addresses. Blocking these on 443 for LAN
+# clients stops a browser with DoH configured by hand from resolving names
+# behind the router's back — which silently defeats FakeIP routing, so the
+# sites that should go through the tunnel quietly stop doing so.
+# Scoped to the tproxy inbound at the routing level, so the router's own DoH
+# (including the DNS failover fallbacks) is unaffected.
+DOH_BLOCK_IPS="1.1.1.1 1.0.0.1 1.1.1.2 1.0.0.2 1.1.1.3 1.0.0.3 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 94.140.14.14 94.140.15.15 208.67.222.222 208.67.220.220 45.90.28.0/24 45.90.30.0/24 194.242.2.2 76.76.2.0/24 76.76.10.0/24"

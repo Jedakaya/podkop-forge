@@ -2153,6 +2153,18 @@ sing_box_configure_route() {
         config=$(sing_box_cf_add_single_key_reject_rule "$config" "$SB_TPROXY_INBOUND_TAG" "protocol" "quic")
     fi
 
+    # Placed before any section routing so it wins: a client resolving names
+    # over its own DoH never reaches the router's DNS, so FakeIP never assigns
+    # an address and the traffic silently stops being routed through the tunnel.
+    local block_client_doh doh_block_ips_json
+    config_get_bool block_client_doh "settings" "block_client_doh" 0
+    if [ "$block_client_doh" -eq 1 ]; then
+        doh_block_ips_json="$(printf '%s\n' $DOH_BLOCK_IPS | jq -Rac --slurp 'split("\n") | map(select(length > 0))')"
+        config=$(sing_box_cm_add_ip_port_reject_route_rule \
+            "$config" "$SB_TPROXY_INBOUND_TAG" "$doh_block_ips_json" '[443]' "$(gen_id)")
+        log "Client DoH endpoints are blocked at the routing level" "info"
+    fi
+
     local first_outbound_section
     first_outbound_section="$(get_first_outbound_section)"
     if subscription_outbound_is_unavailable "$first_outbound_section"; then

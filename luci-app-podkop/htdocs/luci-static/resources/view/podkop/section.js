@@ -146,6 +146,26 @@ function createSectionContent(section) {
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
 
   o = section.option(
+    form.Value,
+    "subscription_include",
+    _("Оставить только серверы"),
+    _("Список ключевых слов через запятую. Если задан, из подписки останутся только серверы, в названии которых встречается хотя бы одно слово. Регистр не важен. Пример: nl, de"),
+  );
+  o.placeholder = "nl, de";
+  o.rmempty = true;
+  o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
+
+  o = section.option(
+    form.Value,
+    "subscription_exclude",
+    _("Исключить серверы"),
+    _("Список ключевых слов через запятую. Серверы, в названии которых встречается хотя бы одно слово, будут исключены. Применяется после списка «Оставить только». Пример: info, trial"),
+  );
+  o.placeholder = "info, trial";
+  o.rmempty = true;
+  o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
+
+  o = section.option(
     form.DynamicList,
     "selector_proxy_links",
     _("Selector Proxy Links"),

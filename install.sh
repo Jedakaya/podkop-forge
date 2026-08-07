@@ -186,6 +186,108 @@ reclaim_flash_space() {
     fi
 }
 
+ROLLBACK_DIR="/tmp/podkop-rollback"
+
+installed_podkop_version() {
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        apk list --installed 2>/dev/null | sed -n 's/^podkop-\([0-9][^ ]*\)-r[0-9]* .*//p' | head -n 1
+    else
+        opkg list-installed 2>/dev/null | sed -n 's/^podkop - \([0-9][^ ]*\)$//p' | head -n 1
+    fi
+}
+
+# Everything needed to undo an upgrade is staged in RAM: the config file is
+# tiny, and the previous packages are re-downloaded rather than kept on the
+# overlay, so a router with a few megabytes free pays nothing for the safety
+# net. Nothing here survives a reboot, which is the correct lifetime — the
+# rollback is only ever needed within this install session.
+backup_before_upgrade() {
+    local version asset url
+
+    rm -rf "$ROLLBACK_DIR"
+    mkdir -p "$ROLLBACK_DIR" || return 1
+
+    [ -f /etc/config/podkop ] && cp /etc/config/podkop "$ROLLBACK_DIR/podkop.config"
+
+    version="$(installed_podkop_version)"
+    if [ -z "$version" ]; then
+        msg "Не удалось определить установленную версию — откат будет только по конфигу"
+        return 0
+    fi
+
+    printf '%s' "$version" > "$ROLLBACK_DIR/version"
+    msg "Готовлю откат на случай неудачи (текущая версия $version)..."
+
+    for asset in podkop luci-app-podkop; do
+        url="https://github.com/Jedakaya/podkop-forge/releases/download/v${version}/${asset}-${version}-r1.apk"
+        [ "$PKG_IS_APK" -eq 1 ] || url="https://github.com/Jedakaya/podkop-forge/releases/download/v${version}/${asset}_${version}-r1_all.ipk"
+
+        if ! wget -q -O "$ROLLBACK_DIR/$(basename "$url")" "$url"; then
+            rm -f "$ROLLBACK_DIR/$(basename "$url")"
+            msg "Пакет $asset $version недоступен — откат будет только по конфигу"
+            rm -f "$ROLLBACK_DIR/version"
+            return 0
+        fi
+    done
+
+    return 0
+}
+
+# The upgrade is only considered good once podkop is actually serving traffic
+# again. "The package installed without an error" is not the same thing, and
+# telling the two apart is the entire point of this check.
+upgrade_is_healthy() {
+    local waited=0
+
+    [ -x /usr/bin/podkop ] || return 1
+
+    while [ "$waited" -lt 45 ]; do
+        if pgrep sing-box >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 3
+        waited=$((waited + 3))
+    done
+
+    return 1
+}
+
+rollback_upgrade() {
+    local version pkg restored=0
+
+    msg ""
+    msg "Обновление не заработало — откатываю."
+
+    version="$(cat "$ROLLBACK_DIR/version" 2>/dev/null)"
+
+    if [ -n "$version" ]; then
+        for pkg in "$ROLLBACK_DIR"/*.apk "$ROLLBACK_DIR"/*.ipk; do
+            [ -f "$pkg" ] || continue
+            pkg_install "$pkg" && restored=1
+        done
+    fi
+
+    if [ -f "$ROLLBACK_DIR/podkop.config" ]; then
+        cp "$ROLLBACK_DIR/podkop.config" /etc/config/podkop
+        msg "Конфигурация восстановлена из резервной копии"
+    fi
+
+    /etc/init.d/podkop restart >/dev/null 2>&1
+
+    if [ "$restored" -eq 1 ]; then
+        msg "Откат на версию $version выполнен"
+    else
+        msg "Пакеты откатить не удалось, восстановлена только конфигурация"
+        msg "Резервная копия: $ROLLBACK_DIR/podkop.config"
+    fi
+
+    if upgrade_is_healthy; then
+        msg "Podkop работает после отката"
+    else
+        msg "Podkop не поднялся и после отката — смотрите logread | grep podkop"
+    fi
+}
+
 update_config() {
     printf "\033[48;5;196m\033[1m╔══════════════════════════════════════════════════════════════════════╗\033[0m\n"
     printf "\033[48;5;196m\033[1m║ ! Обнаружена старая версия podkop.                                   ║\033[0m\n"
@@ -237,8 +339,10 @@ main() {
 
     pkg_list_update || { echo "Packages list update failed"; exit 1; }
 
+    PODKOP_IS_UPGRADE=0
     if [ -f "/etc/init.d/podkop" ]; then
         msg "Podkop is already installed. Upgrading..."
+        PODKOP_IS_UPGRADE=1
     else
         msg "Installing podkop..."
     fi
@@ -295,6 +399,8 @@ main() {
     reclaim_flash_space
     check_available_space || exit 1
 
+    [ "$PODKOP_IS_UPGRADE" -eq 1 ] && backup_before_upgrade
+
     for pkg in podkop luci-app-podkop; do
         file=""
         for f in "$DOWNLOAD_DIR"/"$pkg"*; do
@@ -344,6 +450,17 @@ main() {
     fi
 
     find "$DOWNLOAD_DIR" -type f -name '*podkop*' -exec rm {} \;
+
+    if [ "$PODKOP_IS_UPGRADE" -eq 1 ]; then
+        msg "Проверяю, что podkop поднялся после обновления..."
+        if upgrade_is_healthy; then
+            msg "Podkop работает"
+            rm -rf "$ROLLBACK_DIR"
+        else
+            rollback_upgrade
+            exit 1
+        fi
+    fi
 }
 
 overlay_free_kb() {
