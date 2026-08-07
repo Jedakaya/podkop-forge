@@ -412,7 +412,14 @@ maybe_install_client_panel() {
     msg "Установить панель управления для клиентов? Простой интерфейс на порту $PANEL_PORT y/n"
     msg "(Install the simple client control panel?)"
     while true; do
-        read -r -p '' PANEL_ANSWER
+        # A failed read means stdin is exhausted — the script is being piped
+        # answers, as cgi-bin/update-podkop does. Looping on "введите y или n"
+        # there would hang the request forever, so EOF declines and returns.
+        if ! read -r -p '' PANEL_ANSWER; then
+            msg "Ответ не получен — панель не устанавливается."
+            break
+        fi
+
         case $PANEL_ANSWER in
         y|Y)
             install_client_panel
