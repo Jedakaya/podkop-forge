@@ -3,6 +3,8 @@
 
 REPO="https://api.github.com/repos/Jedakaya/podkop-forge/releases/latest"
 DOWNLOAD_DIR="/tmp/podkop"
+# Package-manager cache lives in RAM, never on the overlay.
+APK_CACHE_DIR="/tmp/apk-cache"
 COUNT=3
 
 # Cached flag to switch between ipk or apk package managers
@@ -23,7 +25,7 @@ pkg_is_installed () {
         # grep -q should work without change based on example from documentation
         # apk list --installed --providers dnsmasq
         # <dnsmasq> dnsmasq-full-2.90-r3 x86_64 {feeds/base/package/network/services/dnsmasq} (GPL-2.0) [installed]
-        apk list --installed | grep -q "$pkg_name"
+        apk --cache-dir "$APK_CACHE_DIR" list --installed | grep -q "$pkg_name"
     else
         opkg list-installed | grep -q "$pkg_name"
     fi
@@ -35,7 +37,7 @@ pkg_remove() {
     if [ "$PKG_IS_APK" -eq 1 ]; then
         # TODO: check --force-depends flag
         # Nothing here: https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet
-        apk del "$pkg_name"
+        apk --cache-dir "$APK_CACHE_DIR" del "$pkg_name"
     else
         opkg remove --force-depends "$pkg_name"
     fi
@@ -46,7 +48,7 @@ pkg_list_update() {
     local rc
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        out=$(apk update 2>&1)
+        out=$(apk --cache-dir "$APK_CACHE_DIR" update 2>&1)
     else
         out=$(opkg update 2>&1)
     fi
@@ -61,7 +63,7 @@ pkg_list_update() {
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
 
         if [ "$PKG_IS_APK" -eq 1 ]; then
-            apk update
+            apk --cache-dir "$APK_CACHE_DIR" update
         else
             opkg update
         fi
@@ -115,9 +117,44 @@ pkg_install() {
     local pkg_file="$1"
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        apk add --allow-untrusted --upgrade "$pkg_file"
+        apk --cache-dir "$APK_CACHE_DIR" add --allow-untrusted --upgrade "$pkg_file"
     else
         opkg install "$pkg_file"
+    fi
+}
+
+# Package-manager scratch space. On most OpenWrt builds /var already points
+# into tmpfs, but not on every one of them, and an index or a cached archive
+# written to the overlay is exactly the transient write that fails first on a
+# nearly full flash. Pinning it to RAM costs nothing and removes the doubt.
+prepare_ram_scratch() {
+    mkdir -p "$APK_CACHE_DIR" 2>/dev/null
+    mkdir -p "$DOWNLOAD_DIR" 2>/dev/null
+    export TMPDIR="/tmp"
+}
+
+# Frees flash that is pure cache: nothing here is needed to keep the router
+# running, and all of it is regenerated on demand. Runs before the package
+# lists are refreshed so the fresh index lands in the space just reclaimed.
+reclaim_flash_space() {
+    local before after freed
+
+    before=$(overlay_free_kb)
+
+    rm -rf /var/cache/apk/* 2>/dev/null
+    rm -rf /var/opkg-lists/* 2>/dev/null
+    rm -rf /usr/lib/opkg/lists/* 2>/dev/null
+    rm -rf /usr/lib/opkg/tmp/* 2>/dev/null
+    rm -f /var/log/*.old /var/log/*.gz 2>/dev/null
+    find /tmp -maxdepth 1 -name 'podkop*.apk' -o -maxdepth 1 -name 'podkop*.ipk' 2>/dev/null | while read -r stale; do
+        rm -f "$stale"
+    done
+
+    after=$(overlay_free_kb)
+    freed=$((after - before))
+
+    if [ "$freed" -gt 0 ]; then
+        msg "Освобождено кэша на флэш-памяти: $((freed)) КБ"
     fi
 }
 
@@ -162,6 +199,10 @@ update_config() {
 
 main() {
     check_system
+
+    prepare_ram_scratch
+    reclaim_flash_space
+
     sing_box
 
     /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123
@@ -170,11 +211,8 @@ main() {
 
     if [ -f "/etc/init.d/podkop" ]; then
         msg "Podkop is already installed. Upgrading..."
-        # Packages are downloaded to /tmp (RAM) — no overlay space check needed.
-        # pkg_install upgrades in-place; the package manager handles file replacement.
     else
         msg "Installing podkop..."
-        check_available_space || exit 1
     fi
 
     if command -v curl >/dev/null 2>&1; then
@@ -221,6 +259,13 @@ main() {
         msg "No packages were downloaded successfully"
         exit 1
     fi
+
+    # Checked here, not before the download: only now is the real size of the
+    # packages known, and the archives themselves sit in RAM so they cost no
+    # flash. Refusing here still leaves the router exactly as it was, which is
+    # the whole point — the old flow could stop halfway through installing.
+    reclaim_flash_space
+    check_available_space || exit 1
 
     for pkg in podkop luci-app-podkop; do
         file=""
@@ -273,19 +318,55 @@ main() {
     find "$DOWNLOAD_DIR" -type f -name '*podkop*' -exec rm {} \;
 }
 
-REQUIRED_SPACE=15360 # 15MB in KB
+overlay_free_kb() {
+    df /overlay 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# Space actually needed for the packages sitting in DOWNLOAD_DIR. Installed
+# size exceeds the compressed archive, and the package manager briefly holds
+# old and new files at once, so the archive size is doubled with a small
+# margin on top. This replaced a flat 15 MB constant that by itself refused
+# installs on routers with plenty of room for the ~1 MB podkop actually needs.
+required_space_kb() {
+    local archives_kb
+    archives_kb=$(du -sk "$DOWNLOAD_DIR" 2>/dev/null | awk '{print $1}')
+    [ -z "$archives_kb" ] && archives_kb=1024
+    echo $((archives_kb * 2 + 1024))
+}
 
 # Returns 0 if /overlay has enough free space, 1 otherwise.
-# Prints available/required only on failure.
 check_available_space() {
-    local avail
-    avail=$(df /overlay | awk 'NR==2 {print $4}')
-    if [ "$avail" -lt "$REQUIRED_SPACE" ]; then
+    local avail required
+    avail=$(overlay_free_kb)
+    required=$(required_space_kb)
+
+    [ -z "$avail" ] && return 0
+
+    if [ "$avail" -lt "$required" ]; then
         msg "Недостаточно места на флэш-памяти"
-        msg "Доступно: $((avail/1024)) МБ  |  Требуется: $((REQUIRED_SPACE/1024)) МБ"
+        msg "Доступно: $((avail)) КБ  |  Требуется: $((required)) КБ"
+        report_flash_usage
         return 1
     fi
     return 0
+}
+
+# Printed only when an install is refused: guessing what to delete is the worst
+# part of hitting a full overlay, so the script names the biggest candidates
+# instead of leaving the user to hunt for them.
+report_flash_usage() {
+    msg ""
+    msg "Что занимает место на /overlay (топ-10):"
+    du -sk /overlay/upper/* 2>/dev/null | sort -rn | head -10 | while read -r size path; do
+        msg "  $((size)) КБ  $path"
+    done
+    msg ""
+    msg "Установленные пакеты по размеру можно посмотреть так:"
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        msg "  apk list --installed --quiet | xargs -n1 apk info --size 2>/dev/null | sort -rn | head"
+    else
+        msg "  opkg list-installed | cut -d' ' -f1 | xargs -n1 opkg info | grep -A1 ^Package"
+    fi
 }
 
 # Removes installed podkop packages to free overlay space before upgrade.
