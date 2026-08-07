@@ -3053,8 +3053,7 @@ async function runFakeIPCheck() {
     )
   };
   const routerUnreachable = !routerData || routerData.unreachable === true;
-  const browserUnreachable = !browserFakeIPData || !browserIPData;
-  const testServiceUnreachable = routerUnreachable && browserUnreachable;
+  const testServiceUnreachable = routerUnreachable && !browserFakeIPData;
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood = checks.router || checks.browserFakeIP || checks.differentIP;
   const { state, description } = testServiceUnreachable ? {

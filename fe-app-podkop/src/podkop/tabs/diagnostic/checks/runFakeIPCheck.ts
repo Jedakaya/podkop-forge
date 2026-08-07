@@ -50,8 +50,11 @@ export async function runFakeIPCheck() {
   // the test could not run.
   const routerUnreachable =
     !routerData || (routerData as { unreachable?: boolean }).unreachable === true;
-  const browserUnreachable = !browserFakeIPData || !browserIPData;
-  const testServiceUnreachable = routerUnreachable && browserUnreachable;
+  // Only the FakeIP endpoint decides this. ip.podkop.fyi is a separate service
+  // used to compare addresses, and it stays reachable on networks where the
+  // FakeIP endpoint is cut by SNI — requiring both to fail meant the check
+  // never recognised the very situation it was written for.
+  const testServiceUnreachable = routerUnreachable && !browserFakeIPData;
 
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood =
