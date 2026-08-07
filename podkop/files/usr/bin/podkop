@@ -3603,7 +3603,24 @@ check_sing_box() {
 }
 
 check_fakeip() {
-    curl -m 3 -s "https://$FAKEIP_TEST_DOMAIN/check" | jq .
+    local body
+
+    body="$(curl -m 5 -s "https://$FAKEIP_TEST_DOMAIN/check" 2> /dev/null)"
+
+    # An empty body used to leave callers unable to tell "FakeIP is broken"
+    # from "the test service could not be reached" — two very different
+    # verdicts that were both being reported as a failure.
+    if [ -z "$body" ]; then
+        echo '{"fakeip":false,"unreachable":true}' | jq .
+        return 0
+    fi
+
+    if ! printf '%s' "$body" | jq -e . > /dev/null 2>&1; then
+        echo '{"fakeip":false,"unreachable":true}' | jq .
+        return 0
+    fi
+
+    printf '%s' "$body" | jq .
 }
 
 #######################################

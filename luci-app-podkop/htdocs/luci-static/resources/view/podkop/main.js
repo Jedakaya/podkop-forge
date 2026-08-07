@@ -3052,9 +3052,32 @@ async function runFakeIPCheck() {
       browserFakeIPData?.IP && browserIPData?.IP && browserFakeIPData.IP !== browserIPData.IP
     )
   };
+  const routerUnreachable = !routerData || routerData.unreachable === true;
+  const browserUnreachable = !browserFakeIPData || !browserIPData;
+  const testServiceUnreachable = routerUnreachable && browserUnreachable;
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood = checks.router || checks.browserFakeIP || checks.differentIP;
-  const { state, description } = getMeta({ atLeastOneGood, allGood });
+  const { state, description } = testServiceUnreachable ? {
+    state: "warning",
+    description: _("FakeIP test service is unreachable, check skipped")
+  } : getMeta({ atLeastOneGood, allGood });
+  if (testServiceUnreachable) {
+    updateCheckStore({
+      order,
+      code,
+      title,
+      description,
+      state,
+      items: [
+        {
+          state: "warning",
+          key: _("Could not reach the FakeIP test service"),
+          value: FAKEIP_CHECK_DOMAIN
+        }
+      ]
+    });
+    return;
+  }
   updateCheckStore({
     order,
     code,

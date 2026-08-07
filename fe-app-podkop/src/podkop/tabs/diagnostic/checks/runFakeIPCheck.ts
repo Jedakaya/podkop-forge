@@ -4,6 +4,7 @@ import { PodkopShellMethods, RemoteFakeIPMethods } from '../../../methods';
 import { IDiagnosticsChecksItem } from '../../../services';
 import { updateCheckStore } from './updateCheckStore';
 import { getMeta } from '../helpers/getMeta';
+import { FAKEIP_CHECK_DOMAIN } from '../../../../constants';
 
 export async function runFakeIPCheck() {
   const { order, title, code } = DIAGNOSTICS_CHECKS_MAP.FAKEIP;
@@ -43,11 +44,44 @@ export async function runFakeIPCheck() {
     ),
   };
 
+  // Every sub-check here depends on an external test service. When that
+  // service cannot be reached, the check proves nothing either way — reporting
+  // a red failure while the tunnel demonstrably works is worse than admitting
+  // the test could not run.
+  const routerUnreachable =
+    !routerData || (routerData as { unreachable?: boolean }).unreachable === true;
+  const browserUnreachable = !browserFakeIPData || !browserIPData;
+  const testServiceUnreachable = routerUnreachable && browserUnreachable;
+
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood =
     checks.router || checks.browserFakeIP || checks.differentIP;
 
-  const { state, description } = getMeta({ atLeastOneGood, allGood });
+  const { state, description } = testServiceUnreachable
+    ? {
+        state: 'warning' as const,
+        description: _('FakeIP test service is unreachable, check skipped'),
+      }
+    : getMeta({ atLeastOneGood, allGood });
+
+  if (testServiceUnreachable) {
+    updateCheckStore({
+      order,
+      code,
+      title,
+      description,
+      state,
+      items: [
+        {
+          state: 'warning',
+          key: _('Could not reach the FakeIP test service'),
+          value: FAKEIP_CHECK_DOMAIN,
+        },
+      ],
+    });
+
+    return;
+  }
 
   updateCheckStore({
     order,

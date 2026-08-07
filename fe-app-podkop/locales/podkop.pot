@@ -1111,3 +1111,9 @@ msgstr ""
 
 msgid "Plain DNS answers cannot be trusted, use DoH or DoT"
 msgstr ""
+
+msgid "FakeIP test service is unreachable, check skipped"
+msgstr ""
+
+msgid "Could not reach the FakeIP test service"
+msgstr ""

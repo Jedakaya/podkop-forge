@@ -793,3 +793,9 @@ msgstr "Провайдер перехватывает 53 порт"
 
 msgid "Plain DNS answers cannot be trusted, use DoH or DoT"
 msgstr "Ответам обычного DNS доверять нельзя, используйте DoH или DoT"
+
+msgid "FakeIP test service is unreachable, check skipped"
+msgstr "Сервис проверки FakeIP недоступен, проверка пропущена"
+
+msgid "Could not reach the FakeIP test service"
+msgstr "Не удалось связаться с сервисом проверки FakeIP"
