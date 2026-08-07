@@ -3,8 +3,6 @@
 
 REPO="https://api.github.com/repos/Jedakaya/podkop-forge/releases/latest"
 DOWNLOAD_DIR="/tmp/podkop"
-# Package-manager cache lives in RAM, never on the overlay.
-APK_CACHE_DIR="/tmp/apk-cache"
 COUNT=3
 
 # Cached flag to switch between ipk or apk package managers
@@ -25,7 +23,7 @@ pkg_is_installed () {
         # grep -q should work without change based on example from documentation
         # apk list --installed --providers dnsmasq
         # <dnsmasq> dnsmasq-full-2.90-r3 x86_64 {feeds/base/package/network/services/dnsmasq} (GPL-2.0) [installed]
-        apk --cache-dir "$APK_CACHE_DIR" list --installed | grep -q "$pkg_name"
+        apk list --installed | grep -q "$pkg_name"
     else
         opkg list-installed | grep -q "$pkg_name"
     fi
@@ -37,7 +35,7 @@ pkg_remove() {
     if [ "$PKG_IS_APK" -eq 1 ]; then
         # TODO: check --force-depends flag
         # Nothing here: https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet
-        apk --cache-dir "$APK_CACHE_DIR" del "$pkg_name"
+        apk del "$pkg_name"
     else
         opkg remove --force-depends "$pkg_name"
     fi
@@ -48,7 +46,7 @@ pkg_list_update() {
     local rc
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        out=$(apk --cache-dir "$APK_CACHE_DIR" update 2>&1)
+        out=$(apk update 2>&1)
     else
         out=$(opkg update 2>&1)
     fi
@@ -63,17 +61,45 @@ pkg_list_update() {
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
 
         if [ "$PKG_IS_APK" -eq 1 ]; then
-            apk --cache-dir "$APK_CACHE_DIR" update
+            out=$(apk update 2>&1)
         else
-            opkg update
+            out=$(opkg update 2>&1)
         fi
         rc=$?
+        printf '%s
+' "$out"
 
         sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1
         sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1
     fi
 
+    [ $rc -eq 0 ] && return 0
+
+    # A single unreachable feed is enough to make apk exit non-zero: one TLS
+    # reset on the telephony repository aborted the whole install while all
+    # ten thousand other packages were indexed just fine. Podkop is installed
+    # from a file downloaded separately, so a partial index is not a reason to
+    # stop — only a completely unusable one is.
+    if pkg_index_is_usable "$out"; then
+        msg "Часть репозиториев недоступна, но индекс пакетов пригоден — продолжаем"
+        return 0
+    fi
+
     return $rc
+}
+
+pkg_index_is_usable() {
+    local out="$1"
+    local count
+
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        count=$(printf '%s' "$out" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) distinct packages available.*//p' | tail -n 1)
+        [ -n "$count" ] && [ "$count" -gt 0 ]
+        return $?
+    fi
+
+    # opkg writes one list file per feed; any of them is enough to resolve deps.
+    ls /var/opkg-lists/* >/dev/null 2>&1
 }
 
 # Если домены GitHub не резолвятся (например, из-за блокировок DNS),
@@ -117,7 +143,7 @@ pkg_install() {
     local pkg_file="$1"
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        apk --cache-dir "$APK_CACHE_DIR" add --allow-untrusted --upgrade "$pkg_file"
+        apk add --allow-untrusted --upgrade "$pkg_file"
     else
         opkg install "$pkg_file"
     fi
@@ -128,7 +154,6 @@ pkg_install() {
 # written to the overlay is exactly the transient write that fails first on a
 # nearly full flash. Pinning it to RAM costs nothing and removes the doubt.
 prepare_ram_scratch() {
-    mkdir -p "$APK_CACHE_DIR" 2>/dev/null
     mkdir -p "$DOWNLOAD_DIR" 2>/dev/null
     export TMPDIR="/tmp"
 }
@@ -141,8 +166,11 @@ reclaim_flash_space() {
 
     before=$(overlay_free_kb)
 
-    rm -rf /var/cache/apk/* 2>/dev/null
-    rm -rf /var/opkg-lists/* 2>/dev/null
+    # /var is a tmpfs symlink on OpenWrt, so the apk cache and opkg lists under
+    # it cost no flash at all — wiping them frees nothing and forces a full
+    # re-download of every package index, which is how one flaky feed started
+    # aborting installs. Only the opkg lists that genuinely live on the overlay
+    # are removed here.
     rm -rf /usr/lib/opkg/lists/* 2>/dev/null
     rm -rf /usr/lib/opkg/tmp/* 2>/dev/null
     rm -f /var/log/*.old /var/log/*.gz 2>/dev/null
