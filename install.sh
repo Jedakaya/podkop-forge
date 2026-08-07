@@ -676,14 +676,25 @@ main() {
 # and every TLS certificate then looks "not yet valid" — which breaks the HTTPS
 # downloads this script depends on. That is what the sync is for.
 clock_is_plausible() {
-    local year
-    year="$(date +%Y 2>/dev/null)"
+    local now ref
 
-    case "$year" in
+    now="$(date +%s 2>/dev/null)"
+    case "$now" in
     '' | *[!0-9]*) return 1 ;;
     esac
 
-    [ "$year" -ge 2024 ]
+    # Compared against a moment that has demonstrably already passed — when
+    # podkop was last installed, or failing that the firmware build — rather
+    # than a hardcoded year, which is stale the moment it is written.
+    ref="$(date -r /usr/bin/podkop +%s 2>/dev/null)"
+    case "$ref" in
+    '' | *[!0-9]*) ref="$(date -r /etc/openwrt_release +%s 2>/dev/null)" ;;
+    esac
+    case "$ref" in
+    '' | *[!0-9]*) return 1 ;;
+    esac
+
+    [ "$now" -ge "$ref" ]
 }
 
 # ntpd -q returns only once the clock is actually set and has no timeout of its
