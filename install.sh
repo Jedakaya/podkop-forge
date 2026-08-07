@@ -538,9 +538,12 @@ main() {
     prepare_ram_scratch
     reclaim_flash_space
 
-    sing_box
-
+    # Before sing_box on purpose: the sing-box upgrade needs working HTTPS, and
+    # once it has replaced the binary the routing path may be down — which is a
+    # bad moment to start waiting on the network.
     sync_time
+
+    sing_box
 
     pkg_list_update || { echo "Packages list update failed"; exit 1; }
 
@@ -686,15 +689,32 @@ clock_is_plausible() {
     # Compared against a moment that has demonstrably already passed — when
     # podkop was last installed, or failing that the firmware build — rather
     # than a hardcoded year, which is stale the moment it is written.
-    ref="$(date -r /usr/bin/podkop +%s 2>/dev/null)"
-    case "$ref" in
-    '' | *[!0-9]*) ref="$(date -r /etc/openwrt_release +%s 2>/dev/null)" ;;
-    esac
-    case "$ref" in
-    '' | *[!0-9]*) return 1 ;;
-    esac
+    ref="$(file_mtime /usr/bin/podkop)"
+    [ -z "$ref" ] && ref="$(file_mtime /etc/openwrt_release)"
+
+    # No usable reference means no opinion, and having no opinion must not cost
+    # a minute of waiting on every run.
+    [ -z "$ref" ] && return 0
 
     [ "$now" -ge "$ref" ]
+}
+
+# `date -r FILE` is absent from older busybox builds, so it cannot be the only
+# way to read a modification time.
+file_mtime() {
+    local path="$1" value
+
+    [ -e "$path" ] || return 0
+
+    value="$(date -r "$path" +%s 2>/dev/null)"
+    case "$value" in
+    '' | *[!0-9]*) value="$(find "$path" -maxdepth 0 -printf '%T@' 2>/dev/null | cut -d. -f1)" ;;
+    esac
+    case "$value" in
+    '' | *[!0-9]*) return 0 ;;
+    esac
+
+    echo "$value"
 }
 
 # ntpd -q returns only once the clock is actually set and has no timeout of its
@@ -703,27 +723,46 @@ clock_is_plausible() {
 #
 # The wait is kept where it earns its place: nothing to wait for when the clock
 # is already sane, and bounded when it is not.
+# busybox changed timeout's calling convention: older builds expect
+# `timeout -t SECS CMD`, newer ones `timeout SECS CMD`. Guessing wrong does not
+# fail loudly — the old build treats the number as the program name — so both
+# forms are probed once against a trivial command before being trusted.
+run_bounded() {
+    local secs="$1"
+    local pid waited=0
+    shift
+
+    if timeout 1 true >/dev/null 2>&1; then
+        timeout "$secs" "$@" >/dev/null 2>&1
+        return 0
+    fi
+
+    if timeout -t 1 true >/dev/null 2>&1; then
+        timeout -t "$secs" "$@" >/dev/null 2>&1
+        return 0
+    fi
+
+    "$@" >/dev/null 2>&1 &
+    pid=$!
+    while [ "$waited" -lt "$secs" ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    kill "$pid" 2>/dev/null
+
+    return 0
+}
+
 sync_time() {
-    local pid waited=0 budget=60
+    local budget=60
 
     [ -x /usr/sbin/ntpd ] || return 0
     clock_is_plausible && return 0
 
     msg "Часы не выставлены, жду синхронизацию времени (до ${budget} с)..."
 
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "$budget" /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
-            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1
-    else
-        /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
-            -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 >/dev/null 2>&1 &
-        pid=$!
-        while [ "$waited" -lt "$budget" ] && kill -0 "$pid" 2>/dev/null; do
-            sleep 1
-            waited=$((waited + 1))
-        done
-        kill "$pid" 2>/dev/null
-    fi
+    run_bounded "$budget" /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 \
+        -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123
 
     if ! clock_is_plausible; then
         msg "Время синхронизировать не удалось — HTTPS-загрузки могут не пройти."
@@ -949,6 +988,39 @@ sing_box_extended_version_from_url() {
 # Upgrades in place with --upgrade and never deletes first. The upstream
 # installer removes sing-box before installing and wants 25 MB free, which on a
 # nearly full router means the old one is gone and the new one does not fit.
+# Replacing the binary leaves the running service on the old, now deleted image,
+# and the package's postinst may restart it with a configuration the new version
+# does not accept. Every packet of this router goes through sing-box, so if it
+# does not come back the next network step blocks with no output at all — which
+# is exactly why the script appeared to hang right after a successful upgrade
+# and then worked on a second run, when there was nothing left to upgrade.
+#
+# Only sing-box is restarted, never podkop: podkop's own start path waits on
+# NTP without a bound in versions still installed on these routers, so
+# restarting it here would trade one hang for another.
+sing_box_bring_back_up() {
+    local waited=0
+
+    [ -x /etc/init.d/sing-box ] || return 0
+
+    msg "Перезапускаю sing-box на новой версии..."
+    /etc/init.d/sing-box restart >/dev/null 2>&1
+
+    while [ "$waited" -lt 30 ]; do
+        if pgrep "sing-box" >/dev/null 2>&1; then
+            msg "sing-box работает."
+            return 0
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+
+    msg "sing-box не поднялся после обновления."
+    msg "Установка продолжится, но сеть роутера сейчас может не работать —"
+    msg "тогда проверьте: logread | grep sing-box"
+    return 0
+}
+
 sing_box_extended_upgrade() {
     local url latest installed tmpfile keep
 
@@ -1013,6 +1085,7 @@ sing_box_extended_upgrade() {
     if pkg_install "$tmpfile"; then
         msg "sing-box-extended обновлён: $installed -> $latest"
         rm -f "$tmpfile"
+        sing_box_bring_back_up
         return 0
     fi
 
