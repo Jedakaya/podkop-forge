@@ -209,11 +209,6 @@ backup_before_upgrade() {
 
     [ -f /etc/config/podkop ] && cp /etc/config/podkop "$ROLLBACK_DIR/podkop.config"
 
-    # The pid is what makes the health check meaningful. Without it "sing-box
-    # is running" can simply be the old process that was never restarted, so a
-    # broken package would pass as healthy and never be rolled back.
-    pgrep sing-box 2>/dev/null | head -n 1 > "$ROLLBACK_DIR/singbox.pid"
-
     version="$(installed_podkop_version)"
     if [ -z "$version" ]; then
         msg "Не удалось определить установленную версию — откат будет только по конфигу"
@@ -242,22 +237,21 @@ backup_before_upgrade() {
 # again. "The package installed without an error" is not the same thing, and
 # telling the two apart is the entire point of this check.
 upgrade_is_healthy() {
-    local waited=0 before after
+    local waited=0
 
     [ -x /usr/bin/podkop ] || return 1
 
-    before="$(cat "$ROLLBACK_DIR/singbox.pid" 2>/dev/null)"
+    # Restarted explicitly instead of inferring health from a changed pid. The
+    # package's post-upgrade hook only ever runs "start", so an already-running
+    # sing-box keeps its pid — and requiring the pid to change turned every
+    # healthy upgrade into a failed one. Forcing the restart here is what
+    # actually proves the newly installed package can come up.
+    /etc/init.d/podkop restart >/dev/null 2>&1
 
     while [ "$waited" -lt 60 ]; do
-        after="$(pgrep sing-box 2>/dev/null | head -n 1)"
-
-        # A pid that is present and different from the one recorded before the
-        # upgrade proves sing-box actually came back up under the new package,
-        # rather than simply never having been restarted.
-        if [ -n "$after" ] && [ "$after" != "$before" ]; then
+        if pgrep "sing-box" >/dev/null 2>&1; then
             return 0
         fi
-
         sleep 3
         waited=$((waited + 3))
     done
@@ -272,6 +266,10 @@ rollback_upgrade() {
     msg "Обновление не заработало — откатываю."
 
     version="$(cat "$ROLLBACK_DIR/version" 2>/dev/null)"
+
+    if [ -z "$version" ]; then
+        msg "Версия для отката неизвестна — пакеты остаются как есть"
+    fi
 
     if [ -n "$version" ]; then
         for pkg in "$ROLLBACK_DIR"/*.apk "$ROLLBACK_DIR"/*.ipk; do
