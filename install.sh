@@ -360,17 +360,23 @@ panel_address() {
 
 download_panel_into() {
     local dest="$1"
-    local name
+    local name bust
 
     mkdir -p "$dest/cgi-bin" || return 1
 
-    if ! wget -q -O "$dest/index.html" "$PANEL_RAW_BASE/index.html"; then
+    # raw.githubusercontent.com serves branch files from an edge cache, and a
+    # stale copy is indistinguishable from a fresh one. A changing query string
+    # gives each run its own cache key, which is the whole point of installing
+    # the panel from the same run that updates podkop.
+    bust="$(date +%s)"
+
+    if ! wget -q -O "$dest/index.html" "$PANEL_RAW_BASE/index.html?nocache=$bust"; then
         return 1
     fi
     [ -s "$dest/index.html" ] || return 1
 
     for name in $PANEL_CGI_FILES; do
-        if ! wget -q -O "$dest/cgi-bin/$name" "$PANEL_RAW_BASE/cgi-bin/$name"; then
+        if ! wget -q -O "$dest/cgi-bin/$name" "$PANEL_RAW_BASE/cgi-bin/$name?nocache=$bust"; then
             return 1
         fi
         [ -s "$dest/cgi-bin/$name" ] || return 1
