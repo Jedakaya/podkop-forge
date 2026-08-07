@@ -1,0 +1,23 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+CURRENT_URL=$(uci get podkop.main.subscription_url 2>/dev/null)
+DNS_SERVER=$(uci get podkop.settings.dns_server 2>/dev/null)
+DNS_TYPE=$(uci get podkop.settings.dns_type 2>/dev/null || echo "udp")
+UPDATE_INT=$(uci get podkop.main.subscription_update_interval 2>/dev/null)
+DNS_FAILOVER=$(uci get podkop.settings.dns_failover_active 2>/dev/null || echo "0")
+DNS_FAILOVER_ORIG=$(uci get podkop.settings.dns_failover_original_server 2>/dev/null || echo "")
+DNS_FAILOVER_ORIG_TYPE=$(uci get podkop.settings.dns_failover_original_type 2>/dev/null || echo "")
+BLOCK_DOH=$(uci get podkop.settings.block_client_doh 2>/dev/null || echo "0")
+FAILOVER_ON_LOCAL=$(uci get podkop.settings.dns_failover_on_local 2>/dev/null || echo "0")
+SUB_USERINFO=$(/usr/bin/podkop get_subscription_userinfo 2>/dev/null || echo "[]")
+if pgrep "sing-box" > /dev/null 2>&1; then RUNNING="true"; else RUNNING="false"; fi
+if [ -n "$CURRENT_URL" ]; then
+    HAS_SUB="true"
+    DOMAIN=$(echo "$CURRENT_URL" | sed 's|https\?://\([^/]*\).*|\1|')
+    DISPLAY="$DOMAIN/..."
+else
+    HAS_SUB="false"
+    DISPLAY=""
+fi
+echo "{\"running\":$RUNNING,\"has_subscription\":$HAS_SUB,\"subscription_display\":\"$DISPLAY\",\"dns_server\":\"$DNS_SERVER\",\"dns_type\":\"$DNS_TYPE\",\"update_interval\":\"$UPDATE_INT\",\"dns_failover_active\":\"$DNS_FAILOVER\",\"dns_failover_original\":\"$DNS_FAILOVER_ORIG\",\"dns_failover_original_type\":\"$DNS_FAILOVER_ORIG_TYPE\",\"block_client_doh\":\"$BLOCK_DOH\",\"dns_failover_on_local\":\"$FAILOVER_ON_LOCAL\",\"subscription_userinfo\":$SUB_USERINFO}"

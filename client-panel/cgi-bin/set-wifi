@@ -1,0 +1,61 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+read -r POST_DATA
+TOKEN=$(echo "$POST_DATA" | sed 's/.*token=\([^&]*\).*/\1/')
+SAVED=$(head -n 1 /tmp/vpn-auth-token 2>/dev/null)
+EXPIRES=$(sed -n '2p' /tmp/vpn-auth-token 2>/dev/null)
+if [ -n "$EXPIRES" ] && [ "$(date +%s)" -gt "$EXPIRES" ]; then
+    rm -f /tmp/vpn-auth-token
+    SAVED=""
+fi
+if [ "$TOKEN" != "$SAVED" ] || [ -z "$SAVED" ]; then
+    echo '{"success":false,"error":"Не авторизован"}'
+    exit 0
+fi
+
+SSID24=$(echo "$POST_DATA" | sed 's/.*ssid24=\([^&]*\).*/\1/' | sed 's/+/ /g; s/%20/ /g; s/%2B/+/g')
+SSID5=$(echo "$POST_DATA" | sed 's/.*ssid5=\([^&]*\).*/\1/' | sed 's/+/ /g; s/%20/ /g; s/%2B/+/g')
+PASS=$(echo "$POST_DATA" | sed 's/.*wifipass=\([^&]*\).*/\1/' | sed 's/+/ /g; s/%40/@/g; s/%21/!/g')
+ON24=$(echo "$POST_DATA" | sed 's/.*on24=\([^&]*\).*/\1/')
+ON5=$(echo "$POST_DATA" | sed 's/.*on5=\([^&]*\).*/\1/')
+HT24=$(echo "$POST_DATA" | sed 's/.*ht24=\([^&]*\).*/\1/')
+HT5=$(echo "$POST_DATA" | sed 's/.*ht5=\([^&]*\).*/\1/')
+
+# SSID
+[ -n "$SSID24" ] && uci set wireless.default_radio0.ssid="$SSID24"
+[ -n "$SSID5" ] && uci set wireless.default_radio1.ssid="$SSID5"
+
+# Включение/выключение
+if [ "$ON24" = "1" ]; then
+    uci delete wireless.default_radio0.disabled 2>/dev/null
+else
+    uci set wireless.default_radio0.disabled='1'
+fi
+if [ "$ON5" = "1" ]; then
+    uci delete wireless.default_radio1.disabled 2>/dev/null
+else
+    uci set wireless.default_radio1.disabled='1'
+fi
+
+# Ширина канала 2.4 ГГц
+case "$HT24" in
+    HE20|HE40) uci set wireless.radio0.htmode="$HT24" ;;
+esac
+
+# Ширина канала 5 ГГц
+case "$HT5" in
+    HE20|HE40|HE80|HE160) uci set wireless.radio1.htmode="$HT5" ;;
+esac
+
+# Пароль
+if [ -n "$PASS" ] && [ ${#PASS} -ge 8 ]; then
+    uci set wireless.default_radio0.encryption='psk2'
+    uci set wireless.default_radio0.key="$PASS"
+    uci set wireless.default_radio1.encryption='psk2'
+    uci set wireless.default_radio1.key="$PASS"
+fi
+
+uci commit wireless
+wifi reload > /dev/null 2>&1
+echo '{"success":true}'

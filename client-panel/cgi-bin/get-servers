@@ -1,0 +1,56 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+LOCAL_IP=$(ip addr show br-lan | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+[ -z "$LOCAL_IP" ] && LOCAL_IP="192.168.1.1"
+
+CONFIG="/etc/sing-box/config.json"
+CLASH_API="http://$LOCAL_IP:9090"
+
+if [ ! -f "$CONFIG" ]; then
+    echo '{"servers":[]}'
+    exit 0
+fi
+
+PROXY_DATA=$(curl -s "$CLASH_API/proxies/main-out" 2>/dev/null)
+CURRENT=$(echo "$PROXY_DATA" | jq -r '.now' 2>/dev/null)
+IS_AUTO="false"
+[ "$CURRENT" = "main-urltest-out" ] && IS_AUTO="true"
+
+if [ "$IS_AUTO" = "true" ]; then
+    BEST=$(curl -s "$CLASH_API/proxies/main-urltest-out" 2>/dev/null | jq -r '.now' 2>/dev/null)
+else
+    BEST=""
+fi
+
+ALL_PROXIES=$(curl -s "$CLASH_API/proxies" 2>/dev/null)
+
+RESULT=""
+INDEX=0
+COUNT=$(cat "$CONFIG" | jq '.outbounds[] | select(.type=="urltest") | .outbounds | length' 2>/dev/null | head -1)
+[ -z "$COUNT" ] && COUNT=0
+
+while [ $INDEX -lt $COUNT ]; do
+    TAG=$(cat "$CONFIG" | jq -r ".outbounds[] | select(.type==\"urltest\") | .outbounds[$INDEX]" 2>/dev/null)
+    SERVER=$(cat "$CONFIG" | jq -r --arg tag "$TAG" '.outbounds[] | select(.tag==$tag) | .server' 2>/dev/null | head -1)
+
+    DELAY_MS=$(echo "$ALL_PROXIES" | jq -r --arg tag "$TAG" '.proxies[$tag].history[-1].delay // -1' 2>/dev/null)
+    [ -z "$DELAY_MS" ] || [ "$DELAY_MS" = "null" ] && DELAY_MS="-1"
+
+    [ "$SERVER" = "null" ] && SERVER=""
+
+    TAG_JSON=$(echo "$TAG" | jq -Rs '.[:-1]' 2>/dev/null || echo "\"$TAG\"")
+    SERVER_SAFE=$(echo "$SERVER" | sed 's/"/\\"/g')
+    IS_ACTIVE="false"
+    IS_BEST="false"
+    [ "$IS_AUTO" = "false" ] && [ "$TAG" = "$CURRENT" ] && IS_ACTIVE="true"
+    [ "$IS_AUTO" = "true" ] && [ "$TAG" = "$BEST" ] && IS_BEST="true"
+
+    [ -n "$RESULT" ] && RESULT="$RESULT,"
+    RESULT="${RESULT}{\"tag\":${TAG_JSON},\"server\":\"${SERVER_SAFE}\",\"ping\":${DELAY_MS},\"active\":${IS_ACTIVE},\"best\":${IS_BEST}}"
+    INDEX=$((INDEX + 1))
+done
+
+CURRENT_JSON=$(echo "$CURRENT" | jq -Rs '.[:-1]' 2>/dev/null || echo "\"$CURRENT\"")
+echo "{\"servers\":[$RESULT],\"current\":$CURRENT_JSON,\"is_auto\":$IS_AUTO}"

@@ -1,0 +1,25 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+read -r POST_DATA
+TOKEN=$(echo "$POST_DATA" | sed 's/.*token=\([^&]*\).*/\1/')
+SAVED=$(head -n 1 /tmp/vpn-auth-token 2>/dev/null)
+EXPIRES=$(sed -n '2p' /tmp/vpn-auth-token 2>/dev/null)
+if [ -n "$EXPIRES" ] && [ "$(date +%s)" -gt "$EXPIRES" ]; then
+    rm -f /tmp/vpn-auth-token
+    SAVED=""
+fi
+if [ "$TOKEN" != "$SAVED" ] || [ -z "$SAVED" ]; then
+    echo '{"success":false,"error":"Не авторизован"}'
+    exit 0
+fi
+RAW_URL=$(echo "$POST_DATA" | sed 's/.*sub_url=\([^&]*\).*/\1/')
+SUB_URL=$(echo "$RAW_URL" | sed 's/%3A/:/g; s/%2F/\//g; s/%3F/?/g; s/%3D/=/g; s/%26/\&/g; s/%40/@/g; s/+/ /g; s/%25/%/g')
+if ! echo "$SUB_URL" | grep -qE '^https?://'; then
+    echo '{"success":false,"error":"Некорректная ссылка"}'
+    exit 0
+fi
+uci set podkop.main.subscription_url="$SUB_URL"
+uci commit podkop
+/etc/init.d/podkop restart > /dev/null 2>&1
+echo '{"success":true}'

@@ -1,0 +1,64 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+read -r POST_DATA
+
+# Decodes every percent-escape rather than a hand-picked handful. set-password
+# already decoded fully, so a password containing anything outside that handful
+# — a '?' is enough — could be set here and then never accepted again.
+urldecode() {
+    printf '%b' "$(echo "$1" | sed 's/%/\\x/g; s/+/ /g')"
+}
+
+PASS=$(urldecode "$(echo "$POST_DATA" | sed 's/.*password=\([^&]*\).*/\1/')")
+
+# Rate limit. Without it this endpoint is an online password oracle that
+# answers as fast as the router can hash.
+FAILFILE=/tmp/vpn-auth-failures
+NOW=$(date +%s)
+FAILS=0
+LAST=0
+if [ -f "$FAILFILE" ]; then
+    FAILS=$(head -n 1 "$FAILFILE" 2>/dev/null)
+    LAST=$(sed -n '2p' "$FAILFILE" 2>/dev/null)
+    [ -z "$FAILS" ] && FAILS=0
+    [ -z "$LAST" ] && LAST=0
+    [ $((NOW - LAST)) -gt 900 ] && FAILS=0
+fi
+
+if [ "$FAILS" -ge 5 ]; then
+    echo '{"success":false,"error":"Слишком много попыток. Подождите 15 минут."}'
+    exit 0
+fi
+
+# Если пароль не установлен — пускаем без проверки
+SHADOW_HASH=$(grep "^root:" /etc/shadow | cut -d: -f2)
+if [ -z "$SHADOW_HASH" ] || [ "$SHADOW_HASH" = "*" ] || [ "$SHADOW_HASH" = "!" ]; then
+    TOKEN=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "token-$$-$(date +%s)")
+    printf '%s\n%s\n' "$TOKEN" "$((NOW + 3600))" > /tmp/vpn-auth-token
+    chmod 600 /tmp/vpn-auth-token 2>/dev/null
+    echo "{\"success\":true,\"token\":\"$TOKEN\",\"no_password\":true}"
+    exit 0
+fi
+
+# Экранируем перед подстановкой в JSON: пароль с кавычкой или обратным слэшем
+# иначе переписывает сам вызов ubus, вместо того чтобы им проверяться.
+PASS_JSON=$(printf '%s' "$PASS" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+# Проверяем через ubus — результат сохраняем в файл
+AUTH_RESULT=$(ubus call session login \
+    "{\"username\":\"root\",\"password\":\"$PASS_JSON\",\"timeout\":3600}" 2>/dev/null)
+
+# Извлекаем токен — убираем пробелы и переносы строк перед поиском
+TOKEN=$(echo "$AUTH_RESULT" | tr -d '\n\t ' | grep -o '"ubus_rpc_session":"[^"]*"' | cut -d'"' -f4)
+
+if [ -n "$TOKEN" ]; then
+    printf '%s\n%s\n' "$TOKEN" "$((NOW + 3600))" > /tmp/vpn-auth-token
+    chmod 600 /tmp/vpn-auth-token 2>/dev/null
+    rm -f "$FAILFILE"
+    echo "{\"success\":true,\"token\":\"$TOKEN\"}"
+else
+    printf '%s\n%s\n' "$((FAILS + 1))" "$NOW" > "$FAILFILE"
+    echo '{"success":false,"error":"Неверный пароль"}'
+fi

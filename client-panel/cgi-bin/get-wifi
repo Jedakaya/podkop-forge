@@ -1,0 +1,18 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+SSID24=$(uci get wireless.default_radio0.ssid 2>/dev/null || echo "")
+SSID5=$(uci get wireless.default_radio1.ssid 2>/dev/null || echo "")
+HTMODE24=$(uci get wireless.radio0.htmode 2>/dev/null || echo "HE40")
+HTMODE5=$(uci get wireless.radio1.htmode 2>/dev/null || echo "HE160")
+ENC24=$(uci get wireless.default_radio0.encryption 2>/dev/null || echo "none")
+
+# Если поле disabled отсутствует — сеть включена
+DIS24=$(uci get wireless.default_radio0.disabled 2>/dev/null)
+DIS5=$(uci get wireless.default_radio1.disabled 2>/dev/null)
+[ "$DIS24" = "1" ] && ON24="false" || ON24="true"
+[ "$DIS5" = "1" ] && ON5="false" || ON5="true"
+[ "$ENC24" = "none" ] && HAS_PASS="false" || HAS_PASS="true"
+
+echo "{\"ssid24\":\"$SSID24\",\"ssid5\":\"$SSID5\",\"on24\":$ON24,\"on5\":$ON5,\"has_password\":$HAS_PASS,\"htmode24\":\"$HTMODE24\",\"htmode5\":\"$HTMODE5\"}"

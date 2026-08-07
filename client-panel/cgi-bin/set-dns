@@ -1,0 +1,39 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+read -r POST_DATA
+TOKEN=$(echo "$POST_DATA" | sed 's/.*token=\([^&]*\).*/\1/')
+SAVED=$(head -n 1 /tmp/vpn-auth-token 2>/dev/null)
+EXPIRES=$(sed -n '2p' /tmp/vpn-auth-token 2>/dev/null)
+if [ -n "$EXPIRES" ] && [ "$(date +%s)" -gt "$EXPIRES" ]; then
+    rm -f /tmp/vpn-auth-token
+    SAVED=""
+fi
+if [ "$TOKEN" != "$SAVED" ] || [ -z "$SAVED" ]; then
+    echo '{"success":false,"error":"Не авторизован"}'
+    exit 0
+fi
+DNS=$(echo "$POST_DATA" | sed 's/.*dns=\([^&]*\).*/\1/' | sed 's/%2E/./g; s/%2D/-/g')
+PROTO=$(echo "$POST_DATA" | sed 's/.*proto=\([^&]*\).*/\1/')
+# Валидация — принимает IP и домены (например dns.adguard-dns.com)
+if ! echo "$DNS" | grep -qE '^[0-9a-zA-Z][0-9a-zA-Z._-]*$'; then
+    echo '{"success":false,"error":"Некорректный адрес DNS"}'
+    exit 0
+fi
+# Валидация протокола
+case "$PROTO" in
+    udp|doh|dot) ;;
+    *) PROTO="udp" ;;
+esac
+uci del podkop.settings.dns_failover_active 2>/dev/null
+uci del podkop.settings.dns_failover_original_type 2>/dev/null
+uci del podkop.settings.dns_failover_original_server 2>/dev/null
+uci del podkop.settings.dns_failover_original_bootstrap 2>/dev/null
+# Индекс тоже: без него следующее автопереключение стартует с середины
+# списка и пропускает лучшие варианты.
+uci del podkop.settings.dns_failover_index 2>/dev/null
+uci set podkop.settings.dns_server="$DNS"
+uci set podkop.settings.dns_type="$PROTO"
+uci commit podkop
+/etc/init.d/podkop restart > /dev/null 2>&1
+echo '{"success":true}'

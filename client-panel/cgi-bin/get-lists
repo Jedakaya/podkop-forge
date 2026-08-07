@@ -1,0 +1,27 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+# Списки сообщества — каждый элемент в кавычки
+ACTIVE=""
+for item in $(uci get podkop.main.community_lists 2>/dev/null); do
+    [ -n "$ACTIVE" ] && ACTIVE="$ACTIVE,"
+    ACTIVE="${ACTIVE}\"$item\""
+done
+
+DOMAIN_TYPE=$(uci get podkop.main.user_domain_list_type 2>/dev/null || echo "disabled")
+SUBNET_TYPE=$(uci get podkop.main.user_subnet_list_type 2>/dev/null || echo "disabled")
+
+DOMAINS=""
+for d in $(uci get podkop.main.user_domains 2>/dev/null); do
+    [ -n "$DOMAINS" ] && DOMAINS="$DOMAINS,"
+    DOMAINS="${DOMAINS}\"$d\""
+done
+
+SUBNETS=""
+for s in $(uci get podkop.main.user_subnets 2>/dev/null); do
+    [ -n "$SUBNETS" ] && SUBNETS="$SUBNETS,"
+    SUBNETS="${SUBNETS}\"$s\""
+done
+
+echo "{\"community_lists\":[$ACTIVE],\"domain_list_type\":\"$DOMAIN_TYPE\",\"subnet_list_type\":\"$SUBNET_TYPE\",\"user_domains\":[$DOMAINS],\"user_subnets\":[$SUBNETS]}"

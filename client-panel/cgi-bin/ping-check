@@ -1,0 +1,11 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+RESULT=$(ping -c1 -W3 8.8.8.8 2>/dev/null)
+if echo "$RESULT" | grep -q "time="; then
+    MS=$(echo "$RESULT" | grep "time=" | sed 's/.*time=\([0-9]*\).*/\1/')
+    [ -z "$MS" ] && MS="-1"
+    echo "{\"ok\":true,\"ms\":$MS}"
+else
+    echo '{"ok":false,"ms":-1}'
+fi

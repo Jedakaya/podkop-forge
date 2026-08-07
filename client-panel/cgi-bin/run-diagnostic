@@ -1,0 +1,49 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+DNS_RAW=$(/usr/bin/podkop check_dns_available 2>/dev/null)
+DNS_STATUS=$(echo "$DNS_RAW" | jq '.dns_status' 2>/dev/null)
+DNS_ROUTER=$(echo "$DNS_RAW" | jq '.dns_on_router' 2>/dev/null)
+DNS_DHCP=$(echo "$DNS_RAW" | jq '.dhcp_config_status' 2>/dev/null)
+[ "$DNS_STATUS" = "1" ] && [ "$DNS_ROUTER" = "1" ] && [ "$DNS_DHCP" = "1" ] && DNS_OK="true" || DNS_OK="false"
+
+# Провайдер отвечает за чужие DNS-серверы: сам резолвер выглядит живым, но
+# раздаёт подменённые ответы. Клиент должен это видеть, иначе будет считать,
+# что с сетью всё в порядке.
+DNS_INTERCEPTED=$(echo "$DNS_RAW" | jq '.dns_intercepted // 0' 2>/dev/null)
+[ "$DNS_INTERCEPTED" = "1" ] && INTERCEPTED="true" || INTERCEPTED="false"
+
+SB_RAW=$(/usr/bin/podkop check_sing_box 2>/dev/null)
+SB_RUNNING=$(echo "$SB_RAW" | jq '.sing_box_process_running' 2>/dev/null)
+SB_PORTS=$(echo "$SB_RAW" | jq '.sing_box_ports_listening' 2>/dev/null)
+[ "$SB_RUNNING" = "1" ] && [ "$SB_PORTS" = "1" ] && SB_OK="true" || SB_OK="false"
+
+FAKE_RAW=$(/usr/bin/podkop check_fakeip 2>/dev/null)
+FAKE_OK=$(echo "$FAKE_RAW" | jq '.fakeip' 2>/dev/null)
+FAKE_UNREACHABLE=$(echo "$FAKE_RAW" | jq '.unreachable // false' 2>/dev/null)
+FAKE_LOCAL=$(echo "$FAKE_RAW" | jq '.local_fakeip // false' 2>/dev/null)
+
+# Сервис проверки fakeip.podkop.fyi у части провайдеров режется по SNI. Его
+# недоступность ничего не говорит о самом FakeIP, поэтому засчитываем
+# локальное подтверждение: sing-box выдал адрес из пула 198.18.0.0/15.
+if [ "$FAKE_OK" = "true" ]; then
+    TRAFFIC_OK="true"
+elif [ "$FAKE_UNREACHABLE" = "true" ] && [ "$FAKE_LOCAL" = "true" ]; then
+    TRAFFIC_OK="true"
+else
+    TRAFFIC_OK="false"
+fi
+
+VPN_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+[ -z "$VPN_IP" ] && VPN_IP="недоступен"
+
+if [ "$SB_OK" = "false" ]; then
+    OVERALL="error"
+elif [ "$DNS_OK" = "true" ] && [ "$TRAFFIC_OK" = "true" ] && [ "$INTERCEPTED" = "false" ]; then
+    OVERALL="ok"
+else
+    OVERALL="warning"
+fi
+
+echo "{\"overall\":\"$OVERALL\",\"dns\":$DNS_OK,\"vpn\":$SB_OK,\"traffic\":$TRAFFIC_OK,\"dns_intercepted\":$INTERCEPTED,\"ip\":\"$VPN_IP\"}"

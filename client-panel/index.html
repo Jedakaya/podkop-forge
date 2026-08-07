@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#080c14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Домашняя сеть</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;700&family=Golos+Text:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #080c14;
+  --surface: #0d1420;
+  --surface2: #111927;
+  --border: #1e2d42;
+  --border2: #243346;
+  --accent: #00d4ff;
+  --accent2: #0099cc;
+  --green: #00e87a;
+  --red: #ff4060;
+  --yellow: #ffb020;
+  --text: #e8f4ff;
+  --text2: #7a9bbf;
+  --text3: #3d5a7a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Golos Text', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(0,212,255,0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 80% 80%, rgba(0,153,204,0.04) 0%, transparent 50%);
+}
+
+#loginScreen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.login-box { width: 100%; max-width: 380px; }
+
+.login-logo { text-align: center; margin-bottom: 40px; }
+
+.login-logo .router-icon {
+  width: 64px; height: 64px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 28px; margin-bottom: 16px;
+  box-shadow: 0 0 40px rgba(0,212,255,0.25);
+}
+
+.login-logo h1 { font-family: 'Unbounded', sans-serif; font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
+.login-logo p { font-size: 13px; color: var(--text2); margin-top: 6px; }
+
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px; }
+
+.field-label { font-size: 12px; font-weight: 600; color: var(--text2); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; display: block; }
+
+.field-input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  padding: 13px 16px; color: var(--text); font-family: 'Golos Text', sans-serif;
+  font-size: 15px; outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,212,255,0.1); }
+.field-input::placeholder { color: var(--text3); }
+select.field-input option { background: var(--surface2); color: var(--text); }
+
+.btn-primary {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #000; border: none; border-radius: 12px; padding: 14px;
+  font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 700;
+  letter-spacing: 0.03em; cursor: pointer; transition: opacity 0.2s, transform 0.1s; margin-top: 20px;
+}
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:active { transform: scale(0.98); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.no-pass-hint { text-align: center; font-size: 12px; color: var(--text3); margin-top: 16px; }
+
+#dashboard { display: none; }
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: rgba(8,12,20,0.9);
+  backdrop-filter: blur(12px); z-index: 10;
+}
+
+.topbar-logo { display: flex; align-items: center; gap: 10px; }
+.topbar-logo .icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent), var(--accent2)); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.topbar-logo span { font-family: 'Unbounded', sans-serif; font-size: 14px; font-weight: 700; color: var(--text); }
+.topbar-right { display: flex; align-items: center; gap: 12px; }
+
+.inet-badge { display: flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px; font-size: 12px; font-weight: 500; color: var(--text2); }
+.inet-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
+.inet-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.inet-dot.fail { background: var(--red); }
+
+.btn-logout { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--text2); padding: 6px 12px; font-size: 12px; cursor: pointer; transition: border-color 0.2s, color 0.2s; }
+.btn-logout:hover { border-color: var(--text2); color: var(--text); }
+
+.toggle-wrap { position:relative; display:inline-block; width:48px; height:26px; flex-shrink:0; margin-left:12px; }
+.toggle-wrap input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; inset:0; background: var(--border2); border-radius:13px; transition: background 0.2s; }
+.toggle-slider::before { content:''; position:absolute; width:20px; height:20px; left:3px; top:3px; background:#fff; border-radius:50%; transition: transform 0.2s; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+.toggle-wrap input:checked + .toggle-slider { background: var(--accent); box-shadow: 0 0 10px rgba(0,212,255,0.3); }
+.toggle-wrap input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+.main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; display: grid; gap: 16px; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; overflow: visible; }
+.card-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
+.card-title { display: flex; align-items: center; gap: 10px; font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.2px; }
+.card-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+.card-icon.cyan { background: rgba(0,212,255,0.12); }
+.card-icon.green { background: rgba(0,232,122,0.12); }
+.card-icon.yellow { background: rgba(255,176,32,0.12); }
+.card-icon.red { background: rgba(255,64,96,0.12); }
+.card-body { padding: 20px 24px; }
+
+.vpn-status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.stat-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin-bottom: 8px; }
+.stat-value { font-family: 'Unbounded', sans-serif; font-size: 13px; font-weight: 600; color: var(--text); }
+.stat-value.green { color: var(--green); }
+.stat-value.red { color: var(--red); }
+.stat-value.yellow { color: var(--yellow); }
+
+.vpn-big-status { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 16px; }
+.vpn-pulse { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; position: relative; }
+.vpn-pulse.active { background: rgba(0,232,122,0.15); }
+.vpn-pulse.active::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid rgba(0,232,122,0.3); animation: ring 2s ease-out infinite; }
+@keyframes ring { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
+.vpn-pulse.inactive { background: rgba(255,64,96,0.12); }
+.vpn-pulse.loading { background: rgba(0,212,255,0.1); }
+.vpn-status-info { flex: 1; }
+.vpn-status-title { font-family: 'Unbounded', sans-serif; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.vpn-status-title.active { color: var(--green); }
+.vpn-status-title.inactive { color: var(--red); }
+.vpn-status-title.loading { color: var(--accent); }
+.vpn-status-sub { font-size: 13px; color: var(--text2); }
+
+.btn-restart { background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.2); border-radius: 10px; color: var(--accent); padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
+.btn-restart:hover { background: rgba(0,212,255,0.2); }
+
+.sub-current { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+.sub-domain { font-size: 13px; color: var(--accent); font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-empty { font-size: 13px; color: var(--text3); }
+
+.field-row { display: flex; gap: 10px; }
+.field-row .field-input { flex: 1; }
+
+.btn-apply { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #000; border: none; border-radius: 12px; padding: 13px 20px; font-family: 'Unbounded', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: opacity 0.2s; flex-shrink: 0; }
+.btn-apply:hover { opacity: 0.9; }
+.btn-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.dns-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+.dns-option { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; cursor: pointer; transition: border-color 0.2s, background 0.2s; display: flex; align-items: center; gap: 10px; }
+.dns-option:hover { border-color: var(--border2); }
+.dns-option.selected { border-color: var(--accent); background: rgba(0,212,255,0.06); }
+.dns-radio { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border2); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: border-color 0.2s; }
+.dns-option.selected .dns-radio { border-color: var(--accent); }
+.dns-option.selected .dns-radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.dns-info { flex: 1; }
+.dns-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.dns-ip { font-size: 11px; color: var(--text2); margin-top: 2px; font-family: monospace; }
+.dns-custom-row { display: flex; gap: 10px; margin-top: 8px; }
+
+.wifi-fields { display: grid; gap: 12px; }
+.wifi-field { display: grid; gap: 6px; }
+
+.btn-secondary { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; color: var(--text); padding: 12px; font-family: 'Golos Text', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: border-color 0.2s; }
+.btn-secondary:hover { border-color: var(--border2); }
+
+.danger-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.danger-row:last-child { border-bottom: none; padding-bottom: 0; }
+.danger-row:first-child { padding-top: 0; }
+.danger-info h3 { font-size: 14px; font-weight: 600; color: var(--text); }
+.danger-info p { font-size: 12px; color: var(--text2); margin-top: 3px; }
+.btn-danger { background: rgba(255,64,96,0.1); border: 1px solid rgba(255,64,96,0.2); border-radius: 10px; color: var(--red); padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.2s; flex-shrink: 0; }
+.btn-danger:hover { background: rgba(255,64,96,0.2); }
+
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--border2); border-radius: 12px; padding: 12px 20px; font-size: 14px; font-weight: 500; color: var(--text); z-index: 100; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); white-space: nowrap; max-width: 90vw; text-align: center; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast.ok { border-color: rgba(0,232,122,0.4); color: var(--green); }
+.toast.err { border-color: rgba(255,64,96,0.4); color: var(--red); }
+
+.spinner { width: 16px; height: 16px; border: 2px solid rgba(0,0,0,0.2); border-top-color: #000; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.ping-row { display: flex; align-items: flex-end; gap: 3px; height: 32px; margin-top: 8px; }
+.ping-bar { flex: 1; background: rgba(0,212,255,0.15); border-radius: 3px; transition: height 0.3s ease; min-height: 3px; }
+.ping-bar.fail { background: rgba(255,64,96,0.3); }
+.server-item{display:flex;align-items:center;gap:12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:8px;transition:border-color .2s}
+.server-item.best{border-color:var(--green)}
+.server-ping{font-family:'Unbounded',sans-serif;font-size:12px;font-weight:700;min-width:52px;text-align:right;flex-shrink:0}
+.server-ping.good{color:var(--green)}.server-ping.ok{color:var(--yellow)}.server-ping.bad{color:var(--red)}.server-ping.na{color:var(--text3)}
+.server-info{flex:1;overflow:hidden}
+.server-tag{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.server-host{font-size:11px;color:var(--text3);margin-top:2px;font-family:monospace}
+.server-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;flex-shrink:0}
+.tooltip-wrap{position:relative;display:inline-flex;align-items:center;margin-left:6px;cursor:pointer}
+.tooltip-icon{width:18px;height:18px;border-radius:50%;background:rgba(0,212,255,0.15);color:var(--accent);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid rgba(0,212,255,0.2)}
+.tooltip-box{position:absolute;left:24px;top:50%;transform:translateY(-50%);background:#1e2d42;border:1px solid var(--border2);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text2);line-height:1.5;width:240px;z-index:100;display:none;font-family:'Golos Text',sans-serif;font-weight:400;letter-spacing:0;box-shadow:0 8px 24px rgba(0,0,0,0.4)}
+.tooltip-wrap:hover .tooltip-box{display:block}
+@media(max-width:600px){.tooltip-box{left:auto;right:0;top:28px;transform:none;width:220px}}
+.tabs{display:flex;flex-direction:row;gap:4px;padding:12px 20px 0;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:57px;z-index:9;overflow-x:auto}
+.tab{padding:10px 20px;font-family:'Unbounded',sans-serif;font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;border-radius:10px 10px 0 0;border:1px solid transparent;border-bottom:none;transition:color .2s,background .2s;white-space:nowrap}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);background:var(--bg);border-color:var(--border)}
+.tab-panel{display:none}.tab-panel.active{display:block}
+@media(max-width:600px){.tab{padding:8px 12px;font-size:11px}.tabs{padding:12px 10px 0;gap:2px}}
+.diag-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.diag-row:last-child{border-bottom:none}
+.diag-icon{font-size:20px;width:28px;text-align:center;flex-shrink:0}
+.diag-info{flex:1}
+.diag-name{font-size:13px;font-weight:600;color:var(--text)}
+.diag-desc{font-size:12px;color:var(--text2);margin-top:2px}
+
+@media (max-width: 600px) {
+  .vpn-status-grid { grid-template-columns: 1fr 1fr; }
+  .dns-grid { grid-template-columns: 1fr 1fr; }
+  .field-row { flex-direction: column; }
+  .btn-apply { width: 100%; }
+  .topbar { padding: 12px 14px; }
+  .topbar-logo span { font-size: 12px; }
+  .main { padding: 12px 10px 60px; gap: 12px; }
+  .card-body { padding: 14px; }
+  .card-header { padding: 14px 14px 10px; }
+  .card-title { font-size: 12px; }
+  .vpn-big-status { flex-wrap: wrap; gap: 10px; padding: 14px; }
+  .vpn-pulse { width: 40px; height: 40px; font-size: 17px; }
+  .vpn-status-title { font-size: 14px; }
+  .btn-restart { width: 100%; text-align: center; }
+  .stat-box { padding: 12px; }
+  .stat-value { font-size: 12px; }
+  .dns-option { padding: 10px 12px; }
+  .dns-name { font-size: 12px; }
+  .dns-ip { font-size: 10px; }
+  .login-card { padding: 24px 20px; }
+  .inet-badge { display: none; }
+  .danger-row { flex-direction: column; gap: 10px; align-items: flex-start; }
+  .btn-danger { width: 100%; text-align: center; }
+  .toggle-wrap { width: 44px; height: 24px; }
+  .toggle-slider::before { width: 18px; height: 18px; }
+  .toggle-wrap input:checked + .toggle-slider::before { transform: translateX(20px); }
+}
+
+@media (max-width: 380px) {
+  .dns-grid { grid-template-columns: 1fr; }
+  .card-body { padding: 12px; }
+  .main { padding: 10px 8px 60px; }
+}
+.list-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px}.list-item{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px 14px;cursor:pointer;transition:border-color .2s,background .2s;display:flex;align-items:center;gap:10px}.list-item:hover{border-color:var(--border2)}.list-item.checked{border-color:var(--accent);background:rgba(0,212,255,.06)}.list-cb{width:16px;height:16px;border-radius:4px;border:2px solid var(--border2);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .2s,background .2s;font-size:10px}.list-item.checked .list-cb{border-color:var(--accent);background:var(--accent);color:#000}.list-name{font-size:13px;font-weight:600;color:var(--text)}.list-group-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin:16px 0 8px;grid-column:1/-1}.tags-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;min-height:32px}.tag{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--text)}.tag-del{background:none;border:none;cursor:pointer;color:var(--text3);font-size:14px;line-height:1;padding:0;transition:color .2s}.tag-del:hover{color:var(--red)}.tag-add-row{display:flex;gap:8px}.tag-add-row .field-input{flex:1;padding:10px 14px;font-size:13px}.btn-tag-add{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);border-radius:10px;color:var(--accent);padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .2s}.btn-tag-add:hover{background:rgba(0,212,255,.2)}.type-select{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.type-opt{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:border-color .2s;text-align:center;font-size:12px;font-weight:600;color:var(--text2)}.type-opt.selected{border-color:var(--accent);color:var(--accent);background:rgba(0,212,255,.06)}@media(max-width:600px){.list-grid{grid-template-columns:1fr 1fr}}@media(max-width:380px){.list-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="router-icon">🏠</div>
+      <h1>Домашняя сеть</h1>
+      <p>Настройки роутера</p>
+    </div>
+    <div class="login-card">
+      <label class="field-label" for="loginPass">Пароль роутера</label>
+      <input type="password" class="field-input" id="loginPass" placeholder="Введите пароль" autocomplete="current-password">
+      <div id="loginErr" style="font-size:13px;color:var(--red);margin-top:10px;display:none"></div>
+      <button class="btn-primary" id="loginBtn" onclick="doLogin()">Войти</button>
+      <p class="no-pass-hint" id="noPassHint" style="display:none">Пароль не установлен — вход без пароля</p>
+    </div>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard">
+  <div class="topbar">
+    <div class="topbar-logo">
+      <div class="icon">🏠</div>
+      <span>Домашняя сеть</span>
+    </div>
+    <div class="topbar-right">
+      <div class="inet-badge">
+        <div class="inet-dot" id="inetDot"></div>
+        <span id="inetText">Проверка...</span>
+      </div>
+      <button class="btn-logout" onclick="logout()">Выйти</button>
+    </div>
+  </div>
+
+  <div style="background:rgba(0,212,255,0.05);border-bottom:1px solid rgba(0,212,255,0.1);padding:10px 24px;text-align:center">
+    <span style="font-size:12px;color:var(--text2)">Это упрощённый интерфейс. Полные настройки роутера доступны в <a href="#" onclick="window.open('http://'+window.location.hostname,'_blank');return false;" style="color:var(--accent);text-decoration:none">административной панели</a></span>
+  </div>
+
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('main')">🏠 Главная</div>
+    <div class="tab" onclick="switchTab('settings')">⚙️ Настройки</div>
+    <div class="tab" onclick="switchTab('system')">🔧 Система</div>
+  </div>
+
+  <div class="tab-panel active" id="tab-main">
+  <div class="main">
+    <!-- VPN STATUS -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon cyan">🔒</div>
+          Статус подключения
+          <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">Показывает работает ли VPN прямо сейчас. Зелёный — всё хорошо, трафик идёт через VPN. Красный — VPN не работает, попробуйте перезапустить.</div></div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="vpn-big-status">
+          <div class="vpn-pulse loading" id="vpnPulse">
+            <span id="vpnEmoji">⟳</span>
+          </div>
+          <div class="vpn-status-info">
+            <div class="vpn-status-title loading" id="vpnTitle">Загрузка...</div>
+            <div class="vpn-status-sub" id="vpnSub">Получаем статус</div>
+          </div>
+          <button class="btn-restart" onclick="restartVpn()">⟳ Перезапустить</button>
+        </div>
+        <div class="vpn-status-grid">
+          <div class="stat-box">
+            <div class="stat-label">Сервис</div>
+            <div class="stat-value" id="statSub">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Обновление</div>
+            <div class="stat-value" id="statInterval">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">DNS сервер</div>
+            <div class="stat-value" id="statDns">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Пинг WAN</div>
+            <div class="stat-value" id="statPing">—</div>
+          </div>
+        </div>
+        <div class="ping-row" id="pingChart"></div>
+
+        <!-- Серверы -->
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <label class="field-label" style="margin-bottom:0">Серверы подписки
+              <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box" style="width:280px">Задержка измеряется через VPN-туннель — HTTP-запрос к Google проходит весь путь: вы → сервер → интернет → обратно. Поэтому 150–300 мс это норма, а не проблема.<br><br>Из чего складывается: пинг до сервера (~50 мс) + путь от сервера до Google + TLS-рукопожатие.<br><br>На реальных сайтах вы почувствуете меньше — YouTube и Telegram стоят ближе к серверам, чем тест-адрес Google.<br><br>Автовыбор переключится на другой сервер только если он быстрее на 50 мс и более.</div></div>
+            </label>
+            <button class="btn-restart" onclick="loadServers()" id="serversRefreshBtn">↻ Обновить</button>
+          </div>
+          <div id="serversList">
+            <div style="font-size:13px;color:var(--text3);text-align:center;padding:16px">Загрузка серверов...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SUBSCRIPTION -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon green">🔑</div>
+          Ключ подключения
+          <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">Ссылку подписки вы получили в Telegram-боте после оплаты. Скопируйте её и вставьте в поле ниже. Без этого VPN работать не будет.</div></div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="sub-current" id="subCurrent">
+          <span style="font-size:16px">🔗</span>
+          <span class="sub-empty">Сервис не настроен</span>
+        </div>
+        <div id="subInfoBlock" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:10px;font-size:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3)">Трафик</span>
+            <span id="subInfoTraffic" style="font-family:'Unbounded',sans-serif;font-size:11px;font-weight:600;color:var(--text)">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+            <span style="font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text3)">Истекает</span>
+            <span id="subInfoExpire" style="color:var(--text2)">—</span>
+          </div>
+        </div>
+        <div class="field-row">
+          <input type="text" class="field-input" id="subUrl" placeholder="https://..." autocomplete="off" spellcheck="false">
+          <button class="btn-apply" id="subBtn" onclick="applySubscription()">Применить</button>
+        </div>
+        <button class="btn-restart" style="width:100%;text-align:center;margin-top:10px" id="subUpdateBtn" onclick="updateSubscription()">↻ Обновить подписку сейчас</button>
+        <p style="font-size:12px;color:var(--text3);margin-top:10px;line-height:1.5">
+          Ключ подключения выдаётся при подключении к сервису. Обновляется автоматически каждый час, либо вручную кнопкой выше.
+        </p>
+      </div>
+    </div>
+
+  </div></div>  <!-- end tab-main -->
+  <div class="tab-panel" id="tab-settings">
+  <div class="main">
+    <!-- DNS -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon yellow">🌐</div>
+          DNS сервер
+          <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">DNS — это как телефонная книга интернета, переводит названия сайтов в адреса. Рекомендуем Google (8.8.8.8) или Яндекс (77.88.8.8). Менять нужно только если сайты плохо открываются.</div></div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="dnsFailoverBanner" style="display:none;background:rgba(255,176,32,0.08);border:1px solid rgba(255,176,32,0.25);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <span style="font-size:15px;flex-shrink:0">⚡</span>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--yellow);margin-bottom:3px">DNS автоматически переключён</div>
+              <div style="font-size:12px;color:var(--text2);line-height:1.5" id="dnsFailoverText"></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-bottom:16px">
+          <label class="field-label" style="margin-bottom:8px">Протокол DNS</label>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <div class="dns-option" data-proto="udp" onclick="selectProto(this)" id="proto_udp">
+              <div class="dns-radio"></div>
+              <div class="dns-info">
+                <div class="dns-name">UDP</div>
+                <div class="dns-ip">Стандартный</div>
+              </div>
+            </div>
+            <div class="dns-option" data-proto="doh" onclick="selectProto(this)" id="proto_doh">
+              <div class="dns-radio"></div>
+              <div class="dns-info">
+                <div class="dns-name">DoH</div>
+                <div class="dns-ip">Через HTTPS</div>
+              </div>
+            </div>
+            <div class="dns-option" data-proto="dot" onclick="selectProto(this)" id="proto_dot">
+              <div class="dns-radio"></div>
+              <div class="dns-info">
+                <div class="dns-name">DoT</div>
+                <div class="dns-ip">Через TLS</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="background:rgba(255,176,32,0.07);border:1px solid rgba(255,176,32,0.2);border-radius:10px;padding:10px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
+          <span style="font-size:15px;flex-shrink:0">⚠️</span>
+          <span style="font-size:12px;color:#c8922a;line-height:1.5">DoH и DoT могут блокироваться провайдером. Рекомендуется оставить <b>UDP</b> — он работает стабильнее всего.</span>
+        </div>
+        <label class="field-label" style="margin-bottom:8px">DNS сервер</label>
+        <div class="dns-grid">
+          <div class="dns-option" data-dns="8.8.8.8" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">Google</div>
+              <div class="dns-ip">8.8.8.8</div>
+            </div>
+          </div>
+          <div class="dns-option" data-dns="1.1.1.1" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">Cloudflare</div>
+              <div class="dns-ip">1.1.1.1</div>
+            </div>
+          </div>
+          <div class="dns-option" data-dns="77.88.8.8" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">Яндекс</div>
+              <div class="dns-ip">77.88.8.8</div>
+            </div>
+          </div>
+          <div class="dns-option" data-dns="dns.adguard-dns.com" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">AdGuard</div>
+              <div class="dns-ip">dns.adguard-dns.com</div>
+            </div>
+          </div>
+          <div class="dns-option" data-dns="9.9.9.9" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">Quad9</div>
+              <div class="dns-ip">9.9.9.9</div>
+            </div>
+          </div>
+          <div class="dns-option" data-dns="custom" onclick="selectDns(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">Свой</div>
+              <div class="dns-ip">Ввести вручную</div>
+            </div>
+          </div>
+        </div>
+        <div class="dns-custom-row" id="dnsCustomRow" style="display:none">
+          <input type="text" class="field-input" id="dnsCustom" placeholder="Например: 9.9.9.9 или dns.example.com">
+        </div>
+        <button class="btn-apply" style="margin-top:12px" onclick="applyDns()">Сохранить DNS</button>
+      </div>
+    </div>
+
+    <!-- LISTS -->
+    <div class="card">
+      <div class="card-header"><div class="card-title"><div class="card-icon green">📋</div>Списки маршрутизации<div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">Выберите какие сайты идут через VPN. Для России рекомендуется режим "Россия" — он автоматически включает все заблокированные сайты. Дополнительно можно добавить отдельные сервисы.</div></div></div></div>
+      <div class="card-body">
+
+        <!-- Шаг 1: базовый режим -->
+        <label class="field-label" style="margin-bottom:8px">Базовый режим</label>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.5">Определяет какие сайты по умолчанию идут через VPN</p>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px" id="baseModeGrid">
+          <div class="dns-option" data-base="russia_inside" onclick="selectBase(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">🇷🇺 Россия (рекомендуется)</div>
+              <div class="dns-ip">Заблокированные в РФ сайты</div>
+            </div>
+          </div>
+          <div class="dns-option" data-base="russia_outside" onclick="selectBase(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">🌍 За пределами РФ</div>
+              <div class="dns-ip">Для пользователей за рубежом</div>
+            </div>
+          </div>
+          <div class="dns-option" data-base="ukraine_inside" onclick="selectBase(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">🇺🇦 Украина</div>
+              <div class="dns-ip">Заблокированные в Украине</div>
+            </div>
+          </div>
+          <div class="dns-option" data-base="none" onclick="selectBase(this)">
+            <div class="dns-radio"></div>
+            <div class="dns-info">
+              <div class="dns-name">⚙️ Вручную</div>
+              <div class="dns-ip">Выбрать списки самостоятельно</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Предупреждение для russia_inside -->
+        <div id="russiaInsideInfo" style="display:none;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.2);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.6">
+          ✅ Режим <b>Россия</b> уже включает: заблокированные сайты, новости, аниме, YouTube, HDRezka, TikTok, Meta, Twitter и другие.<br>
+          Ниже можно добавить <b>дополнительные</b> сервисы которые нужно усилить (подсети для голосовых чатов и т.д.)
+        </div>
+
+        <!-- Шаг 2: доп списки (зависят от режима) -->
+        <div id="extraListsWrap">
+          <label class="field-label" style="margin-bottom:8px;margin-top:16px" id="extraListsLabel">Дополнительные сервисы</label>
+          <div class="list-grid" id="communityGrid"></div>
+        </div>
+
+        <!-- Домены -->
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <label class="field-label" style="margin-bottom:8px">Свои домены</label>
+          <div class="type-select" id="domainTypeSelect">
+            <div class="type-opt" data-val="disabled" onclick="selectType('domain',this)">Отключено</div>
+            <div class="type-opt" data-val="dynamic" onclick="selectType('domain',this)">Динамический</div>
+            <div class="type-opt" data-val="file" onclick="selectType('domain',this)">Текстовый</div>
+          </div>
+          <div id="domainListWrap" style="display:none">
+            <div class="tags-wrap" id="domainTags"></div>
+            <div class="tag-add-row">
+              <input type="text" class="field-input" id="domainInput" placeholder="example.com" autocomplete="off" spellcheck="false">
+              <button class="btn-tag-add" onclick="addTag('domain')">+ Добавить</button>
+            </div>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">Без протокола, например: example.com или sub.example.com</p>
+          </div>
+        </div>
+
+        <!-- Подсети -->
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid var(--border)">
+          <label class="field-label" style="margin-bottom:8px">Свои подсети / IP</label>
+          <div class="type-select" id="subnetTypeSelect">
+            <div class="type-opt" data-val="disabled" onclick="selectType('subnet',this)">Отключено</div>
+            <div class="type-opt" data-val="dynamic" onclick="selectType('subnet',this)">Динамический</div>
+            <div class="type-opt" data-val="file" onclick="selectType('subnet',this)">Текстовый</div>
+          </div>
+          <div id="subnetListWrap" style="display:none">
+            <div class="tags-wrap" id="subnetTags"></div>
+            <div class="tag-add-row">
+              <input type="text" class="field-input" id="subnetInput" placeholder="1.2.3.4 или 1.2.3.0/24" autocomplete="off" spellcheck="false">
+              <button class="btn-tag-add" onclick="addTag('subnet')">+ Добавить</button>
+            </div>
+            <p style="font-size:11px;color:var(--text3);margin-top:6px">IP адрес или подсеть в нотации CIDR: 103.21.244.0/22</p>
+          </div>
+        </div>
+
+        <button class="btn-apply" style="margin-top:20px;width:100%" onclick="saveLists()">Сохранить списки</button>
+      </div>
+    </div>
+
+    <!-- WIFI -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon cyan">📶</div>
+          Wi-Fi сеть
+          <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">Настройки беспроводной сети. 2.4 ГГц — работает дальше но медленнее, подходит для телевизоров. 5 ГГц — быстрее но ближе, лучше для телефонов и ноутбуков рядом с роутером.</div></div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="wifi-fields">
+          <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:4px">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Сеть 2.4 ГГц</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Дальше, медленнее — для телевизоров и умных устройств</div>
+            </div>
+            <label class="toggle-wrap">
+              <input type="checkbox" id="on24">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="wifi-field" style="margin-bottom:4px">
+            <label class="field-label">Название сети 2.4 ГГц</label>
+            <input type="text" class="field-input" id="ssid24" placeholder="Например: MyHome">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;margin-bottom:4px">
+            <div>
+              <label class="field-label" style="margin-bottom:6px">Ширина канала 2.4 ГГц</label>
+              <select class="field-input" id="ht24" style="cursor:pointer">
+                <option value="HE20">20 МГц — стабильнее</option>
+                <option value="HE40">40 МГц — быстрее</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <p style="font-size:11px;color:var(--text3);line-height:1.5;padding-bottom:2px">20 МГц — меньше помех. 40 МГц — выше скорость.</p>
+            </div>
+          </div>
+          <div style="height:16px"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:4px">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">Сеть 5 ГГц</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">Быстрее, ближе — для телефонов и ноутбуков</div>
+            </div>
+            <label class="toggle-wrap">
+              <input type="checkbox" id="on5">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="wifi-field" style="margin-bottom:4px">
+            <label class="field-label">Название сети 5 ГГц</label>
+            <input type="text" class="field-input" id="ssid5" placeholder="Например: MyHome_5G">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;margin-bottom:4px">
+            <div>
+              <label class="field-label" style="margin-bottom:6px">Ширина канала 5 ГГц</label>
+              <select class="field-input" id="ht5" style="cursor:pointer">
+                <option value="HE20">20 МГц</option>
+                <option value="HE40">40 МГц</option>
+                <option value="HE80">80 МГц — рекомендуется</option>
+                <option value="HE160">160 МГц — максимум</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end">
+              <p style="font-size:11px;color:var(--text3);line-height:1.5;padding-bottom:2px">80 МГц — оптимально. 160 МГц — только если роутер близко.</p>
+            </div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="wifi-field">
+            <label class="field-label">Пароль Wi-Fi (общий для обеих сетей)</label>
+            <div style="position:relative">
+              <input type="password" class="field-input" id="wifiPass" placeholder="Минимум 8 символов" autocomplete="new-password" style="padding-right:48px">
+              <button onclick="togglePassVis()" type="button" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:var(--text2);padding:4px;line-height:1" id="passVisBtn">👁</button>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:6px">Оставьте пустым чтобы не менять пароль</div>
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn-apply" style="width:100%;opacity:0.4" onclick="applyWifi()" id="wifiSaveBtn" disabled>💾 Загрузка...</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DISCLAIMER -->
+    <div style="background:rgba(255,64,96,0.05);border:1px solid rgba(255,64,96,0.15);border-radius:14px;padding:16px 20px;display:flex;gap:12px;align-items:flex-start">
+      <span style="font-size:20px;flex-shrink:0">⚠️</span>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:#ff8099;margin-bottom:4px">Важно</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6">
+          Эта панель предназначена для базовой настройки. Изменение параметров в
+          <a href="#" onclick="window.open('http://'+window.location.hostname,'_blank');return false;" style="color:var(--accent);text-decoration:none">полных настройках</a>
+          без понимания последствий может привести к потере доступа к интернету или роутеру.
+        </div>
+      </div>
+    </div>
+
+    <!-- PASSWORD -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon red">🔐</div>
+          Пароль администратора
+          <div class="tooltip-wrap"><div class="tooltip-icon">?</div><div class="tooltip-box">Пароль для входа в эту панель и в полные настройки роутера (192.168.2.1). После смены нужно будет войти заново.</div></div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="wifi-fields">
+          <div class="wifi-field">
+            <label class="field-label">Новый пароль</label>
+            <div style="position:relative">
+              <input type="password" class="field-input" id="newPass" placeholder="Минимум 6 символов" autocomplete="new-password" style="padding-right:48px">
+              <button onclick="toggleNewPassVis()" type="button" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px;color:var(--text2);padding:4px;line-height:1" id="newPassVisBtn">👁</button>
+            </div>
+          </div>
+          <div class="wifi-field">
+            <label class="field-label">Повторите пароль</label>
+            <input type="password" class="field-input" id="confirmPass" placeholder="Введите ещё раз" autocomplete="new-password">
+          </div>
+        </div>
+        <div style="background:rgba(255,176,32,0.07);border:1px solid rgba(255,176,32,0.2);border-radius:10px;padding:10px 14px;margin:14px 0;font-size:12px;color:#c8922a;line-height:1.5">
+          ⚠️ После смены пароля вы будете автоматически выйдены и нужно будет войти снова с новым паролем.
+        </div>
+        <button class="btn-apply" style="width:100%" onclick="changePassword()">Сменить пароль</button>
+      </div>
+    </div>
+
+  </div></div>  <!-- end tab-settings -->
+  <div class="tab-panel" id="tab-system">
+  <div class="main">
+    <!-- DIAGNOSTIC -->
+    <div class="card">
+      <div class="card-header"><div class="card-title"><div class="card-icon cyan">🔍</div>Диагностика</div></div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--text3);margin-bottom:16px;line-height:1.5">Проверяет работу DNS, VPN туннеля и прохождение трафика</p>
+        <div id="diagResult" style="display:none;margin-bottom:16px">
+          <div class="diag-row" id="diagDns">
+            <div class="diag-icon" id="diagDnsIcon">⏳</div>
+            <div class="diag-info">
+              <div class="diag-name">DNS</div>
+              <div class="diag-desc" id="diagDnsDesc">Проверка...</div>
+            </div>
+          </div>
+          <div class="diag-row" id="diagVpn">
+            <div class="diag-icon" id="diagVpnIcon">⏳</div>
+            <div class="diag-info">
+              <div class="diag-name">VPN туннель</div>
+              <div class="diag-desc" id="diagVpnDesc">Проверка...</div>
+            </div>
+          </div>
+          <div class="diag-row" id="diagTraffic">
+            <div class="diag-icon" id="diagTrafficIcon">⏳</div>
+            <div class="diag-info">
+              <div class="diag-name">Трафик через VPN</div>
+              <div class="diag-desc" id="diagTrafficDesc">Проверка...</div>
+            </div>
+          </div>
+          <div id="diagAdvice" style="margin-top:12px;padding:12px 14px;border-radius:10px;font-size:12px;line-height:1.6;display:none"></div>
+        </div>
+        <button class="btn-apply" style="width:100%" id="diagBtn" onclick="runDiagnostic()">Проверить подключение</button>
+      </div>
+    </div>
+
+    <!-- SYSTEM -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <div class="card-icon red">⚙️</div>
+          Система
+        </div>
+      </div>
+      <div class="card-body" style="padding-top:4px;padding-bottom:4px">
+        <div class="danger-row">
+          <div class="danger-info">
+            <h3>Обновление Podkop</h3>
+            <p id="podkopVerText">Текущая версия: загрузка...</p>
+          </div>
+          <button class="btn-danger" id="updatePodkopBtn" onclick="updatePodkop()" style="background:rgba(0,212,255,0.1);border-color:rgba(0,212,255,0.2);color:var(--accent)">Обновить</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-info">
+            <h3>Перезагрузка роутера</h3>
+            <p>Полная перезагрузка. Интернет пропадёт на ~60 секунд</p>
+          </div>
+          <button class="btn-danger" onclick="rebootRouter()">Перезагрузить</button>
+        </div>
+        <div class="danger-row">
+          <div class="danger-info">
+            <h3>Полные настройки</h3>
+            <p>Расширенный интерфейс администратора LuCI</p>
+          </div>
+          <button class="btn-danger" onclick="window.open('http://'+window.location.hostname,'_blank')">Открыть LuCI</button>
+        </div>
+      </div>
+    </div>
+
+  </div></div>  <!-- end tab-system -->
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+var AUTH_TOKEN = sessionStorage.getItem('vpn_token') || '';
+var ROUTER_IP = window.location.hostname;
+var pingHistory = [];
+var selectedDns = '8.8.8.8';
+var selectedProto = 'udp';
+
+function switchTab(name){document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-panel').forEach(function(p){p.classList.remove('active')});document.querySelector('.tab[onclick*="\''+name+'\'"]').classList.add('active');document.getElementById('tab-'+name).classList.add('active')}
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (type||'');
+  void t.offsetWidth;
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 3000);
+}
+
+function checkNoPassword() {
+  fetch('/cgi-bin/auth', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'password='
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) document.getElementById('noPassHint').style.display = 'block';
+  }).catch(function(){});
+}
+
+function doLogin() {
+  var pass = document.getElementById('loginPass').value;
+  var btn = document.getElementById('loginBtn');
+  var err = document.getElementById('loginErr');
+  err.style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  fetch('/cgi-bin/auth', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'password=' + encodeURIComponent(pass)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) {
+      AUTH_TOKEN = d.token;
+      sessionStorage.setItem('vpn_token', d.token);
+      showDashboard();
+    } else {
+      err.textContent = 'Неверный пароль';
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Войти';
+    }
+  }).catch(function(){
+    err.textContent = 'Ошибка соединения с роутером';
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  });
+}
+
+document.getElementById('loginPass').addEventListener('keypress', function(e){
+  if(e.key === 'Enter') doLogin();
+});
+
+function logout() {
+  AUTH_TOKEN = '';
+  sessionStorage.removeItem('vpn_token');
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginPass').value = '';
+}
+
+function showDashboard() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  loadStatus();
+  loadWifi();
+  loadLists();
+  loadServers();
+  loadPodkopVersion();
+  checkInternet();
+  setInterval(loadStatus, 10000);
+  setInterval(checkInternet, 30000);
+  initPingChart();
+}
+
+function loadStatus() {
+  fetch('/cgi-bin/get-status').then(function(r){ return r.json(); }).then(function(d){
+    var pulse = document.getElementById('vpnPulse');
+    var title = document.getElementById('vpnTitle');
+    var sub = document.getElementById('vpnSub');
+    var emoji = document.getElementById('vpnEmoji');
+    if(d.running && d.has_subscription) {
+      pulse.className = 'vpn-pulse active';
+      title.className = 'vpn-status-title active';
+      title.textContent = 'Подключение активно';
+      sub.textContent = d.subscription_display || 'Работает';
+      emoji.textContent = '🔒';
+    } else if(d.has_subscription) {
+      pulse.className = 'vpn-pulse inactive';
+      title.className = 'vpn-status-title inactive';
+      title.textContent = 'Подключение не работает';
+      sub.textContent = 'Сервис есть, но VPN не работает';
+      emoji.textContent = '⚠️';
+    } else {
+      pulse.className = 'vpn-pulse inactive';
+      title.className = 'vpn-status-title inactive';
+      title.textContent = 'Требуется настройка';
+      sub.textContent = 'Введите ключ подключения ниже';
+      emoji.textContent = '🔓';
+    }
+    document.getElementById('statSub').textContent = d.has_subscription ? d.subscription_display : 'Не настроен';
+    document.getElementById('statSub').className = 'stat-value ' + (d.has_subscription ? 'green' : 'red');
+    var interval = d.update_interval || '1h';
+    var intervalText = interval === '1h' ? 'Каждый час' : interval === '6h' ? 'Каждые 6 часов' : interval === '12h' ? 'Каждые 12 часов' : interval === '1d' ? 'Раз в день' : interval;
+    document.getElementById('statInterval').textContent = intervalText;
+    var failoverActive = d.dns_failover_active === '1';
+    var dnsFailoverBanner = document.getElementById('dnsFailoverBanner');
+    if(failoverActive) {
+      document.getElementById('statDns').innerHTML = (d.dns_server||'—') + '<br><span style="font-size:10px;color:var(--yellow)">failover</span>';
+      if(dnsFailoverBanner) {
+        dnsFailoverBanner.style.display = 'block';
+        document.getElementById('dnsFailoverText').textContent = 'Ваш DNS (' + (d.dns_failover_original||'?') + ') был недоступен. Роутер временно использует ' + (d.dns_server||'?') + '. Чтобы вернуть — выберите нужный DNS и нажмите «Сохранить DNS».';
+      }
+      if(d.dns_failover_original) { selectedDns = d.dns_failover_original; highlightDns(d.dns_failover_original); }
+      if(d.dns_failover_original_type) { highlightProto(d.dns_failover_original_type); }
+    } else {
+      document.getElementById('statDns').textContent = d.dns_server || '—';
+      if(dnsFailoverBanner) dnsFailoverBanner.style.display = 'none';
+      if(d.dns_server) { selectedDns = d.dns_server; highlightDns(d.dns_server); }
+      if(d.dns_type) { highlightProto(d.dns_type); }
+    }
+    var cur = document.getElementById('subCurrent');
+    if(d.has_subscription) {
+      cur.innerHTML = '<span style="font-size:16px">🔗</span><span class="sub-domain">' + (d.subscription_display||'') + '</span>';
+    } else {
+      cur.innerHTML = '<span style="font-size:16px">🔗</span><span class="sub-empty">Сервис не настроен</span>';
+    }
+    var subInfoBlock = document.getElementById('subInfoBlock');
+    if(d.subscription_userinfo && d.subscription_userinfo.length > 0 && subInfoBlock) {
+      var ui = d.subscription_userinfo[0];
+      subInfoBlock.style.display = 'block';
+      var traffic = '';
+      if(ui.total > 0) {
+        var pct = Math.round(ui.download / ui.total * 100);
+        traffic = formatBytes(ui.download) + ' / ' + formatBytes(ui.total) + ' (' + pct + '%)';
+      } else if(ui.download > 0) {
+        traffic = formatBytes(ui.download) + ' / ∞';
+      } else {
+        traffic = '—';
+      }
+      document.getElementById('subInfoTraffic').textContent = traffic;
+      var expireEl = document.getElementById('subInfoExpire');
+      if(ui.expire && ui.expire > 0) {
+        var expDate = new Date(ui.expire * 1000);
+        var now = Date.now();
+        var days = Math.ceil((ui.expire * 1000 - now) / 86400000);
+        expireEl.textContent = expDate.toLocaleDateString('ru-RU') + (days > 0 ? ' (' + days + ' дн.)' : ' (истекла)');
+        expireEl.style.color = days < 7 ? 'var(--red)' : days < 30 ? 'var(--yellow)' : 'var(--text2)';
+      } else {
+        expireEl.textContent = '∞';
+        expireEl.style.color = 'var(--green)';
+      }
+    } else if(subInfoBlock) {
+      subInfoBlock.style.display = 'none';
+    }
+  }).catch(function(){});
+}
+
+function checkInternet() {
+  var dot = document.getElementById('inetDot');
+  var txt = document.getElementById('inetText');
+  var t0 = Date.now();
+  fetch('/cgi-bin/ping-check').then(function(r){ return r.json(); }).then(function(d){
+    var ms = (d.ms !== undefined && d.ms >= 0) ? d.ms : (Date.now() - t0);
+    if(d.ok) {
+      dot.className = 'inet-dot ok';
+      txt.textContent = 'Интернет ' + ms + ' мс';
+      document.getElementById('statPing').textContent = ms + ' мс';
+      document.getElementById('statPing').className = 'stat-value green';
+      addPingBar(ms, false);
+    } else {
+      dot.className = 'inet-dot fail';
+      txt.textContent = 'Нет интернета';
+      document.getElementById('statPing').textContent = 'Нет связи';
+      document.getElementById('statPing').className = 'stat-value red';
+      addPingBar(0, true);
+    }
+  }).catch(function(){
+    dot.className = 'inet-dot fail';
+    txt.textContent = 'Нет интернета';
+    addPingBar(0, true);
+  });
+}
+
+function initPingChart() {
+  var c = document.getElementById('pingChart');
+  for(var i=0;i<20;i++) {
+    var b = document.createElement('div');
+    b.className = 'ping-bar';
+    b.style.height = '3px';
+    c.appendChild(b);
+  }
+}
+
+function addPingBar(ms, fail) {
+  pingHistory.push({ms:ms,fail:fail});
+  if(pingHistory.length > 20) pingHistory.shift();
+  var bars = document.querySelectorAll('.ping-bar');
+  var maxMs = Math.max.apply(null, pingHistory.map(function(p){ return p.ms; })) || 1;
+  pingHistory.forEach(function(p, i) {
+    if(bars[i]) {
+      bars[i].className = 'ping-bar' + (p.fail?' fail':'');
+      bars[i].style.height = p.fail ? '100%' : Math.max(3, Math.round((p.ms/maxMs)*100)) + '%';
+    }
+  });
+}
+
+function applySubscription() {
+  var url = document.getElementById('subUrl').value.trim();
+  var btn = document.getElementById('subBtn');
+  if(!url) { showToast('Введите ключ подключения', 'err'); return; }
+  if(!url.startsWith('http')) { showToast('Ссылка должна начинаться с https://', 'err'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  fetch('/cgi-bin/set-subscription', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN) + '&sub_url=' + encodeURIComponent(url)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) {
+      showToast('✓ Сервис сохранён', 'ok');
+      document.getElementById('subUrl').value = '';
+      setTimeout(loadStatus, 3000);
+    } else {
+      showToast('✗ ' + (d.error||'Ошибка'), 'err');
+    }
+  }).catch(function(){ showToast('✗ Ошибка соединения', 'err'); })
+  .finally(function(){ btn.disabled = false; btn.textContent = 'Применить'; });
+}
+
+function updateSubscription() {
+  var btn = document.getElementById('subUpdateBtn');
+  var orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Обновляем...';
+  fetch('/cgi-bin/update-subscription', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) {
+      showToast('✓ Подписка обновлена', 'ok');
+      setTimeout(loadStatus, 2000);
+      setTimeout(loadServers, 2500);
+    } else {
+      showToast('✗ ' + (d.error||'Ошибка обновления подписки'), 'err');
+    }
+  }).catch(function(){ showToast('✗ Ошибка соединения', 'err'); })
+  .finally(function(){ btn.disabled = false; btn.textContent = orig; });
+}
+
+function selectProto(el) {
+  document.querySelectorAll('[data-proto]').forEach(function(o){ o.classList.remove('selected'); });
+  el.classList.add('selected');
+  selectedProto = el.dataset.proto;
+}
+
+function highlightProto(proto) {
+  document.querySelectorAll('[data-proto]').forEach(function(o){ o.classList.remove('selected'); });
+  var el = document.querySelector('[data-proto="' + proto + '"]');
+  if(el) { el.classList.add('selected'); selectedProto = proto; }
+  else { document.querySelector('[data-proto="udp"]').classList.add('selected'); selectedProto = 'udp'; }
+}
+
+function selectDns(el) {
+  document.querySelectorAll('[data-dns]').forEach(function(o){ o.classList.remove('selected'); });
+  el.classList.add('selected');
+  selectedDns = el.dataset.dns;
+  document.getElementById('dnsCustomRow').style.display = selectedDns === 'custom' ? 'flex' : 'none';
+}
+
+function highlightDns(ip) {
+  var found = false;
+  document.querySelectorAll('[data-dns]').forEach(function(o){
+    o.classList.remove('selected');
+    if(o.dataset.dns === ip) { o.classList.add('selected'); found = true; }
+  });
+  if(!found && ip) {
+    var custom = document.querySelector('[data-dns="custom"]');
+    if(custom) {
+      custom.classList.add('selected');
+      document.getElementById('dnsCustomRow').style.display = 'flex';
+      document.getElementById('dnsCustom').value = ip;
+      selectedDns = 'custom';
+    }
+  }
+}
+
+function applyDns() {
+  var dns = selectedDns === 'custom' ? document.getElementById('dnsCustom').value.trim() : selectedDns;
+  if(!dns) { showToast('Введите DNS адрес', 'err'); return; }
+  fetch('/cgi-bin/set-dns', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN) + '&dns=' + encodeURIComponent(dns) + '&proto=' + encodeURIComponent(selectedProto)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) {
+      showToast('✓ DNS сохранён: ' + dns + ' (' + selectedProto.toUpperCase() + ')', 'ok');
+      setTimeout(loadStatus, 1000);
+    } else {
+      showToast('✗ ' + (d.error||'Ошибка'), 'err');
+    }
+  }).catch(function(){ showToast('✗ Ошибка соединения', 'err'); });
+}
+
+function loadWifi() {
+  fetch('/cgi-bin/get-wifi').then(function(r){ return r.json(); }).then(function(d){
+    if(d.ssid24) document.getElementById('ssid24').value = d.ssid24;
+    if(d.ssid5) document.getElementById('ssid5').value = d.ssid5;
+    document.getElementById('on24').checked = !!d.on24;
+    document.getElementById('on5').checked = !!d.on5;
+    if(d.htmode24) document.getElementById('ht24').value = d.htmode24;
+    if(d.htmode5) document.getElementById('ht5').value = d.htmode5;
+    var btn = document.getElementById('wifiSaveBtn');
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.textContent = '💾 Сохранить Wi-Fi';
+  }).catch(function(){});
+}
+
+function applyWifi() {
+  var ssid24 = document.getElementById('ssid24').value.trim();
+  var ssid5 = document.getElementById('ssid5').value.trim();
+  var pass = document.getElementById('wifiPass').value;
+  var on24 = document.getElementById('on24').checked ? '1' : '0';
+  var on5 = document.getElementById('on5').checked ? '1' : '0';
+  if(pass && pass.length < 8) { showToast('Пароль должен быть минимум 8 символов', 'err'); return; }
+  fetch('/cgi-bin/set-wifi', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN) +
+          '&ssid24=' + encodeURIComponent(ssid24) +
+          '&ssid5=' + encodeURIComponent(ssid5) +
+          '&wifipass=' + encodeURIComponent(pass) +
+          '&on24=' + on24 + '&on5=' + on5 +
+          '&ht24=' + encodeURIComponent(document.getElementById('ht24').value) +
+          '&ht5=' + encodeURIComponent(document.getElementById('ht5').value)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) {
+      showToast('✓ Wi-Fi настройки сохранены', 'ok');
+      document.getElementById('wifiPass').value = '';
+    } else {
+      showToast('✗ ' + (d.error||'Ошибка'), 'err');
+    }
+  }).catch(function(){ showToast('✗ Ошибка соединения', 'err'); });
+}
+
+function restartVpn() {
+  showToast('Перезапуск...', '');
+  fetch('/cgi-bin/restart-vpn', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN)
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(d.success) { showToast('✓ Перезапущен', 'ok'); setTimeout(loadStatus, 5000); }
+  }).catch(function(){});
+}
+
+function loadPodkopVersion(){fetch('/cgi-bin/get-podkop-version').then(function(r){return r.json()}).then(function(d){var el=document.getElementById('podkopVerText');var btn=document.getElementById('updatePodkopBtn');if(!el)return;if(d.up_to_date==='true'){el.textContent='Версия '+d.current+' — актуальная';if(btn){btn.textContent='Обновить';btn.style.opacity='0.5'}}else if(d.up_to_date==='false'){el.textContent='Версия '+d.current+' — доступно обновление '+d.latest;el.style.color='var(--yellow)';if(btn){btn.textContent='Обновить до '+d.latest;btn.style.opacity='1'}}else{el.textContent='Версия '+d.current+' (GitHub недоступен)'}}).catch(function(){var el=document.getElementById('podkopVerText');if(el)el.textContent='Версия: не определена'})}
+function updatePodkop(){if(!confirm('Обновление займёт 30-60 секунд. VPN временно отключится. Продолжить?'))return;var btn=document.getElementById('updatePodkopBtn');var ver=document.getElementById('podkopVerText');btn.disabled=true;btn.textContent='Обновляем...';if(ver)ver.textContent='Обновление — пожалуйста подождите...';fetch('/cgi-bin/update-podkop',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(AUTH_TOKEN)}).then(function(r){return r.json()}).then(function(d){if(d.success){if(d.updated){showToast('Podkop обновлён до версии '+d.new,'ok');if(ver)ver.textContent='Версия обновлена: '+d.old+' -> '+d.new}else{showToast('Уже актуальная версия '+d.version,'ok');if(ver)ver.textContent='Актуальная версия: '+d.version}}else{showToast(d.error||'Ошибка обновления','err');if(ver)ver.textContent='Ошибка обновления'}}).catch(function(){showToast('Ошибка соединения','err');if(ver)ver.textContent='Ошибка соединения'}).finally(function(){btn.disabled=false;btn.textContent='Обновить'})}
+function rebootRouter() {
+  if(!confirm('Роутер перезагрузится. Интернет пропадёт на ~60 секунд. Продолжить?')) return;
+  fetch('/cgi-bin/reboot', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'token=' + encodeURIComponent(AUTH_TOKEN)
+  }).then(function(){ showToast('Роутер перезагружается...', 'ok'); }).catch(function(){});
+}
+
+function toggleNewPassVis(){var inp=document.getElementById('newPass'),btn=document.getElementById('newPassVisBtn');if(inp.type==='password'){inp.type='text';btn.textContent='🙈'}else{inp.type='password';btn.textContent='👁'}}
+function changePassword(){var np=document.getElementById('newPass').value,cp=document.getElementById('confirmPass').value;if(!np){showToast('Введите новый пароль','err');return}if(np.length<6){showToast('Пароль минимум 6 символов','err');return}if(np!==cp){showToast('Пароли не совпадают','err');return}if(!confirm('Сменить пароль? После смены нужно будет войти заново.'))return;fetch('/cgi-bin/set-password',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(AUTH_TOKEN)+'&new_pass='+encodeURIComponent(np)+'&confirm_pass='+encodeURIComponent(cp)}).then(function(r){return r.json()}).then(function(d){if(d.success){showToast('Пароль изменён. Выполняется выход...','ok');setTimeout(function(){logout()},2000)}else showToast(d.error||'Ошибка','err')}).catch(function(){showToast('Ошибка соединения','err')})}
+function togglePassVis() {
+  var inp = document.getElementById('wifiPass');
+  var btn = document.getElementById('passVisBtn');
+  if(inp.type === 'password') { inp.type = 'text'; btn.textContent = '🙈'; }
+  else { inp.type = 'password'; btn.textContent = '👁'; }
+}
+
+var RUSSIA_INSIDE_INCLUDED=['geoblock','block','porn','news','anime','youtube','hdrezka','tiktok'];
+var BASE_MODES=['russia_inside','russia_outside','ukraine_inside'];
+var EXTRA_RUSSIA=[{id:'telegram',name:'Telegram',note:''},{id:'discord',name:'Discord',note:'⚡ подсети'},{id:'meta',name:'Meta (FB/Instagram)',note:'⚡ подсети'},{id:'twitter',name:'Twitter (X)',note:'⚡ подсети'},{id:'cloudflare',name:'Cloudflare',note:'⚡ подсети'},{id:'google_ai',name:'Google AI',note:''},{id:'google_play',name:'Google Play',note:''},{id:'hodca',name:'H.O.D.C.A',note:''},{id:'roblox',name:'Roblox',note:''},{id:'hetzner',name:'Hetzner ASN',note:''},{id:'ovh',name:'OVH ASN',note:''},{id:'digitalocean',name:'Digital Ocean ASN',note:''},{id:'cloudfront',name:'CloudFront ASN',note:''}];
+var ALL_LISTS=[{id:'geoblock',name:'Geo Block',cat:'Общие'},{id:'porn',name:'18+',cat:'Общие'},{id:'news',name:'Новости',cat:'Общие'},{id:'anime',name:'Anime',cat:'Контент'},{id:'youtube',name:'YouTube',cat:'Контент'},{id:'hdrezka',name:'HDRezka',cat:'Контент'},{id:'tiktok',name:'TikTok',cat:'Контент'},{id:'telegram',name:'Telegram',cat:'Сервисы'},{id:'discord',name:'Discord ⚡',cat:'Сервисы'},{id:'meta',name:'Meta ⚡',cat:'Сервисы'},{id:'twitter',name:'Twitter (X) ⚡',cat:'Сервисы'},{id:'cloudflare',name:'Cloudflare ⚡',cat:'Сервисы'},{id:'google_ai',name:'Google AI',cat:'Сервисы'},{id:'google_play',name:'Google Play',cat:'Сервисы'},{id:'roblox',name:'Roblox',cat:'Сервисы'},{id:'hodca',name:'H.O.D.C.A',cat:'Сервисы'},{id:'hetzner',name:'Hetzner ASN',cat:'Хостинги'},{id:'ovh',name:'OVH ASN',cat:'Хостинги'},{id:'digitalocean',name:'Digital Ocean ASN',cat:'Хостинги'},{id:'cloudfront',name:'CloudFront ASN',cat:'Хостинги'}];
+var activeLists=[],userDomains=[],userSubnets=[],domainType='disabled',subnetType='disabled',currentBase='russia_inside';
+function selectBase(el){document.querySelectorAll('[data-base]').forEach(function(o){o.classList.remove('selected')});el.classList.add('selected');currentBase=el.dataset.base;updateListsUI()}
+function highlightBase(active){var base='none';BASE_MODES.forEach(function(m){if(active.indexOf(m)!==-1)base=m});currentBase=base;document.querySelectorAll('[data-base]').forEach(function(o){o.classList.remove('selected');if(o.dataset.base===base)o.classList.add('selected')});updateListsUI()}
+function updateListsUI(){var grid=document.getElementById('communityGrid'),info=document.getElementById('russiaInsideInfo'),label=document.getElementById('extraListsLabel');grid.innerHTML='';if(currentBase==='russia_inside'){info.style.display='block';label.textContent='Дополнительные сервисы';EXTRA_RUSSIA.forEach(function(l){var checked=activeLists.indexOf(l.id)!==-1;var el=document.createElement('div');el.className='list-item'+(checked?' checked':'');el.dataset.id=l.id;el.innerHTML='<div class="list-cb">'+(checked?'✓':'')+'</div><div><div class="list-name">'+l.name+(l.note?'<span style="font-size:10px;color:var(--yellow);margin-left:4px">'+l.note+'</span>':'')+'</div></div>';el.onclick=function(){toggleList(l.id,el)};grid.appendChild(el)})}else if(currentBase==='none'){info.style.display='none';label.textContent='Списки сервисов';var cats=['Общие','Контент','Сервисы','Хостинги'];cats.forEach(function(cat){var items=ALL_LISTS.filter(function(l){return l.cat===cat});if(!items.length)return;var lbl=document.createElement('div');lbl.className='list-group-label';lbl.textContent=cat;grid.appendChild(lbl);items.forEach(function(l){var checked=activeLists.indexOf(l.id)!==-1;var el=document.createElement('div');el.className='list-item'+(checked?' checked':'');el.dataset.id=l.id;el.innerHTML='<div class="list-cb">'+(checked?'✓':'')+'</div><div><div class="list-name">'+l.name+'</div></div>';el.onclick=function(){toggleList(l.id,el)};grid.appendChild(el)})})}else{info.style.display='none';label.textContent='Дополнительные сервисы';EXTRA_RUSSIA.forEach(function(l){var checked=activeLists.indexOf(l.id)!==-1;var el=document.createElement('div');el.className='list-item'+(checked?' checked':'');el.dataset.id=l.id;el.innerHTML='<div class="list-cb">'+(checked?'✓':'')+'</div><div><div class="list-name">'+l.name+'</div></div>';el.onclick=function(){toggleList(l.id,el)};grid.appendChild(el)})}}
+function toggleList(id,el){var idx=activeLists.indexOf(id);if(idx===-1){activeLists.push(id);el.classList.add('checked');el.querySelector('.list-cb').textContent='✓'}else{activeLists.splice(idx,1);el.classList.remove('checked');el.querySelector('.list-cb').textContent=''}}
+function renderTags(type){var items=type==='domain'?userDomains:userSubnets;var wrap=document.getElementById(type+'Tags');wrap.innerHTML='';items.forEach(function(val,i){var tag=document.createElement('div');tag.className='tag';tag.innerHTML='<span>'+val+'</span><button class="tag-del" onclick="removeTag(\''+type+'\','+i+')">×</button>';wrap.appendChild(tag)})}
+function addTag(type){var inp=document.getElementById(type+'Input');var val=inp.value.trim();if(!val)return;if(type==='domain'){if(userDomains.indexOf(val)===-1)userDomains.push(val)}else{if(userSubnets.indexOf(val)===-1)userSubnets.push(val)}inp.value='';renderTags(type)}
+function removeTag(type,idx){if(type==='domain')userDomains.splice(idx,1);else userSubnets.splice(idx,1);renderTags(type)}
+document.getElementById('domainInput').addEventListener('keypress',function(e){if(e.key==='Enter')addTag('domain')});
+document.getElementById('subnetInput').addEventListener('keypress',function(e){if(e.key==='Enter')addTag('subnet')});
+function selectType(type,el){var sel=document.getElementById(type+'TypeSelect');sel.querySelectorAll('.type-opt').forEach(function(o){o.classList.remove('selected')});el.classList.add('selected');var val=el.dataset.val;if(type==='domain'){domainType=val;document.getElementById('domainListWrap').style.display=val==='disabled'?'none':'block'}else{subnetType=val;document.getElementById('subnetListWrap').style.display=val==='disabled'?'none':'block'}}
+function highlightType(type,val){var sel=document.getElementById(type+'TypeSelect');sel.querySelectorAll('.type-opt').forEach(function(o){o.classList.remove('selected');if(o.dataset.val===val)o.classList.add('selected')});if(type==='domain'){domainType=val;document.getElementById('domainListWrap').style.display=val==='disabled'?'none':'block'}else{subnetType=val;document.getElementById('subnetListWrap').style.display=val==='disabled'?'none':'block'}}
+function loadLists(){fetch('/cgi-bin/get-lists').then(function(r){return r.json()}).then(function(d){var active=d.community_lists||[];var base='none';BASE_MODES.forEach(function(m){if(active.indexOf(m)!==-1)base=m});if(base==='russia_inside'){activeLists=active.filter(function(id){return BASE_MODES.indexOf(id)===-1&&RUSSIA_INSIDE_INCLUDED.indexOf(id)===-1})}else{activeLists=active.filter(function(id){return BASE_MODES.indexOf(id)===-1});}userDomains=d.user_domains||[];userSubnets=d.user_subnets||[];highlightBase(active);highlightType('domain',d.domain_list_type||'disabled');highlightType('subnet',d.subnet_list_type||'disabled');renderTags('domain');renderTags('subnet')}).catch(function(){})}
+function saveLists(){var lists=[];if(currentBase!=='none')lists.push(currentBase);activeLists.forEach(function(id){if(lists.indexOf(id)===-1)lists.push(id)});fetch('/cgi-bin/set-lists',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(AUTH_TOKEN)+'&lists='+encodeURIComponent(lists.join(','))+'&domain_type='+encodeURIComponent(domainType)+'&subnet_type='+encodeURIComponent(subnetType)+'&domains='+encodeURIComponent(userDomains.join(','))+'&subnets='+encodeURIComponent(userSubnets.join(','))}).then(function(r){return r.json()}).then(function(d){if(d.success)showToast('✓ Списки сохранены','ok');else showToast('✗ '+(d.error||'Ошибка'),'err')}).catch(function(){showToast('✗ Ошибка соединения','err')})}
+function switchServer(tag){fetch('/cgi-bin/set-server',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'token='+encodeURIComponent(AUTH_TOKEN)+'&server='+encodeURIComponent(tag)}).then(function(r){return r.json()}).then(function(d){if(d.success){showToast('Сервер переключён','ok');setTimeout(loadServers,500)}else showToast(d.error||'Ошибка','err')}).catch(function(){showToast('Ошибка соединения','err')})}
+function loadServers(){var wrap=document.getElementById('serversList'),btn=document.getElementById('serversRefreshBtn');if(wrap)wrap.innerHTML='<div style="font-size:13px;color:var(--text3);text-align:center;padding:16px">Получаем задержку серверов...</div>';if(btn)btn.disabled=true;fetch('/cgi-bin/get-servers').then(function(r){return r.json()}).then(function(d){if(!wrap)return;if(!d.servers||!d.servers.length){wrap.innerHTML='<div style="font-size:13px;color:var(--text3);text-align:center;padding:16px">Серверы не найдены</div>';return}var isAuto=d.is_auto;var html='';var autoCls='server-item'+(isAuto?' best':'');var autoBadge=isAuto?'<span class="server-badge best-badge">Активен</span>':'';html+='<div class="'+autoCls+'" style="cursor:pointer" onclick="switchServer(\'main-urltest-out\')"><div class="server-info"><div class="server-tag">Авто (наименьший пинг)</div><div class="server-host">Автоматический выбор лучшего сервера</div></div>'+autoBadge+'</div>';d.servers.forEach(function(s){var isActive=s.active||(!isAuto&&d.current===s.tag);var isBest=s.best;var pingClass=s.ping<0?'na':s.ping<200?'good':s.ping<400?'ok':'bad';var pingText=s.ping<0?'N/A':s.ping+'мс';var badge=isActive?'<span class="server-badge best-badge">Активен</span>':isBest?'<span class="server-badge auto">Лучший</span>':'';var cls='server-item'+(isActive?' best':'');var tagEsc=s.tag.replace(/'/g,"\\'");html+='<div class="'+cls+'" style="cursor:pointer" onclick="switchServer(\''+tagEsc+'\')"><div class="server-info"><div class="server-tag">'+s.tag+'</div>';if(s.server)html+='<div class="server-host">'+s.server+'</div>';html+='</div>'+badge+'<div class="server-ping '+pingClass+'">'+pingText+'</div></div>'});wrap.innerHTML=html}).catch(function(){if(wrap)wrap.innerHTML='<div style="font-size:13px;color:var(--red);text-align:center;padding:16px">Не удалось получить данные серверов</div>'}).finally(function(){if(btn)btn.disabled=false})}
+function runDiagnostic(){var btn=document.getElementById('diagBtn'),res=document.getElementById('diagResult');btn.disabled=true;btn.textContent='Проверяем...';res.style.display='block';document.getElementById('diagDnsIcon').textContent='...';document.getElementById('diagVpnIcon').textContent='...';document.getElementById('diagTrafficIcon').textContent='...';document.getElementById('diagDnsDesc').textContent='Проверка...';document.getElementById('diagVpnDesc').textContent='Проверка...';document.getElementById('diagTrafficDesc').textContent='Проверка...';document.getElementById('diagAdvice').style.display='none';fetch('/cgi-bin/run-diagnostic').then(function(r){return r.json()}).then(function(d){if(d.dns){document.getElementById('diagDnsIcon').textContent='OK';document.getElementById('diagDnsDesc').textContent='DNS работает корректно'}else{document.getElementById('diagDnsIcon').textContent='!!';document.getElementById('diagDnsDesc').textContent='Проблема с DNS — попробуйте сменить DNS сервер'}if(d.vpn){document.getElementById('diagVpnIcon').textContent='OK';document.getElementById('diagVpnDesc').textContent='Туннель активен'}else{document.getElementById('diagVpnIcon').textContent='!!';document.getElementById('diagVpnDesc').textContent='VPN туннель не работает'}if(d.traffic){document.getElementById('diagTrafficIcon').textContent='OK';document.getElementById('diagTrafficDesc').textContent='Трафик через VPN'+(d.ip?', IP: '+d.ip:'')}else{document.getElementById('diagTrafficIcon').textContent='!!';document.getElementById('diagTrafficDesc').textContent='Трафик не проходит через VPN'}var advice=document.getElementById('diagAdvice');if(d.overall==='ok'){advice.style.display='block';advice.style.background='rgba(0,232,122,0.08)';advice.style.border='1px solid rgba(0,232,122,0.2)';advice.style.color='#86efac';advice.textContent='Всё работает нормально'}else if(d.overall==='error'){advice.style.display='block';advice.style.background='rgba(255,64,96,0.08)';advice.style.border='1px solid rgba(255,64,96,0.2)';advice.style.color='#fca5a5';advice.textContent='Попробуйте нажать Перезапустить в блоке статуса. Если не помогло — проверьте ссылку подписки.'}else{advice.style.display='block';advice.style.background='rgba(255,176,32,0.08)';advice.style.border='1px solid rgba(255,176,32,0.2)';advice.style.color='#fcd34d';advice.textContent='Есть небольшие проблемы. Попробуйте перезапустить VPN или сменить DNS сервер.'}}).catch(function(){document.getElementById('diagDnsIcon').textContent='?';document.getElementById('diagVpnIcon').textContent='?';document.getElementById('diagTrafficIcon').textContent='?'}).finally(function(){btn.disabled=false;btn.textContent='Проверить подключение'})}
+function formatBytes(bytes) {
+  if(!bytes || bytes <= 0) return '0 Б';
+  var units = ['Б','КБ','МБ','ГБ','ТБ'];
+  var i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+if(AUTH_TOKEN){showDashboard()}else{checkNoPassword()}
+</script>
+</body>
+</html>

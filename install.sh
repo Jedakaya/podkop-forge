@@ -301,6 +301,136 @@ rollback_upgrade() {
     fi
 }
 
+PANEL_ROOT="/www-podkop-panel"
+PANEL_UHTTPD_SECTION="podkop_panel"
+PANEL_PORT=8080
+PANEL_RAW_BASE="https://raw.githubusercontent.com/Jedakaya/podkop-forge/refs/heads/main/client-panel"
+PANEL_CGI_FILES="auth get-lists get-podkop-version get-servers get-status get-wifi ping-check reboot restart-vpn run-diagnostic set-dns set-lists set-password set-server set-subscription set-wifi update-podkop update-subscription"
+
+# The panel is served by its own uhttpd instance so LuCI keeps port 80 to
+# itself. Reinstalling simply overwrites the files, which is what keeps the
+# panel and podkop in step: both come from the same run of this script.
+panel_is_installed() {
+    [ -f "$PANEL_ROOT/index.html" ]
+}
+
+panel_address() {
+    local host domain lan_ip
+
+    host=$(uci get system.@system[0].hostname 2>/dev/null)
+    [ -z "$host" ] && host=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+    domain=$(uci get dhcp.@dnsmasq[0].domain 2>/dev/null)
+    [ -z "$domain" ] && domain="lan"
+    lan_ip=$(uci get network.lan.ipaddr 2>/dev/null)
+
+    # Deliberately derived, never hardcoded: dnsmasq serves <hostname>.<domain>,
+    # and "openwrt.lan" is only correct while the hostname is still the default.
+    if [ -n "$host" ]; then
+        printf 'http://%s.%s:%s
+' "$(echo "$host" | tr 'A-Z' 'a-z')" "$domain" "$PANEL_PORT"
+    fi
+    [ -n "$lan_ip" ] && printf 'http://%s:%s
+' "$lan_ip" "$PANEL_PORT"
+}
+
+download_panel_into() {
+    local dest="$1"
+    local name
+
+    mkdir -p "$dest/cgi-bin" || return 1
+
+    if ! wget -q -O "$dest/index.html" "$PANEL_RAW_BASE/index.html"; then
+        return 1
+    fi
+    [ -s "$dest/index.html" ] || return 1
+
+    for name in $PANEL_CGI_FILES; do
+        if ! wget -q -O "$dest/cgi-bin/$name" "$PANEL_RAW_BASE/cgi-bin/$name"; then
+            return 1
+        fi
+        [ -s "$dest/cgi-bin/$name" ] || return 1
+    done
+
+    return 0
+}
+
+configure_panel_uhttpd() {
+    uci -q delete uhttpd."$PANEL_UHTTPD_SECTION"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION"=uhttpd
+    uci add_list uhttpd."$PANEL_UHTTPD_SECTION".listen_http="0.0.0.0:$PANEL_PORT"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION".home="$PANEL_ROOT"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION".cgi_prefix="/cgi-bin"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION".index_page="index.html"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION".script_timeout="60"
+    uci set uhttpd."$PANEL_UHTTPD_SECTION".network_timeout="30"
+    uci commit uhttpd
+
+    /etc/init.d/uhttpd restart >/dev/null 2>&1
+}
+
+install_client_panel() {
+    local staging
+
+    # Staged in RAM and only moved into place once every file has arrived, so a
+    # download that dies halfway cannot leave a half-replaced panel behind.
+    staging="/tmp/podkop-panel.$$"
+    rm -rf "$staging"
+
+    msg "Загружаю панель управления..."
+    if ! download_panel_into "$staging"; then
+        rm -rf "$staging"
+        msg "Не удалось загрузить панель — установка панели пропущена, podkop не затронут"
+        return 1
+    fi
+
+    mkdir -p "$PANEL_ROOT" || { rm -rf "$staging"; return 1; }
+    rm -rf "$PANEL_ROOT/cgi-bin"
+    cp "$staging/index.html" "$PANEL_ROOT/index.html"
+    cp -r "$staging/cgi-bin" "$PANEL_ROOT/cgi-bin"
+    chmod 755 "$PANEL_ROOT/cgi-bin"/*
+    rm -rf "$staging"
+
+    configure_panel_uhttpd
+
+    msg ""
+    msg "Панель управления установлена и доступна по адресу:"
+    panel_address | while read -r url; do
+        msg "  $url"
+    done
+    msg "Вход — пароль root от роутера."
+    msg ""
+
+    return 0
+}
+
+maybe_install_client_panel() {
+    if panel_is_installed; then
+        msg "Обновляю панель управления..."
+        install_client_panel
+        return
+    fi
+
+    msg ""
+    msg "Установить панель управления для клиентов? Простой интерфейс на порту $PANEL_PORT y/n"
+    msg "(Install the simple client control panel?)"
+    while true; do
+        read -r -p '' PANEL_ANSWER
+        case $PANEL_ANSWER in
+        y|Y)
+            install_client_panel
+            break
+            ;;
+        n|N)
+            msg "Панель не устанавливается. Поставить позже можно повторным запуском этого скрипта."
+            break
+            ;;
+        *)
+            echo "Введите y или n"
+            ;;
+        esac
+    done
+}
+
 update_config() {
     printf "\033[48;5;196m\033[1m╔══════════════════════════════════════════════════════════════════════╗\033[0m\n"
     printf "\033[48;5;196m\033[1m║ ! Обнаружена старая версия podkop.                                   ║\033[0m\n"
@@ -474,6 +604,10 @@ main() {
             exit 1
         fi
     fi
+
+    # Last, and never fatal: podkop itself is already installed and verified by
+    # this point, so nothing about the panel may put that at risk.
+    maybe_install_client_panel
 }
 
 overlay_free_kb() {

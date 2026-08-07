@@ -1,0 +1,77 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+read -r POST_DATA
+
+TOKEN=$(echo "$POST_DATA" | sed 's/.*token=\([^&]*\).*/\1/')
+SAVED=$(head -n 1 /tmp/vpn-auth-token 2>/dev/null)
+EXPIRES=$(sed -n '2p' /tmp/vpn-auth-token 2>/dev/null)
+if [ -n "$EXPIRES" ] && [ "$(date +%s)" -gt "$EXPIRES" ]; then
+    rm -f /tmp/vpn-auth-token
+    SAVED=""
+fi
+if [ "$TOKEN" != "$SAVED" ] || [ -z "$SAVED" ]; then
+    echo '{"success":false,"error":"Не авторизован"}'
+    exit 0
+fi
+
+# Декодируем данные
+url_decode() {
+    echo "$1" | sed 's/%3A/:/g; s/%2F/\//g; s/%2E/./g; s/%2D/-/g; s/%5F/_/g; s/%2C/,/g; s/%20/ /g; s/+/ /g'
+}
+
+# Списки сообщества — приходят как lists=geoblock,news,anime,...
+LISTS_RAW=$(echo "$POST_DATA" | sed 's/.*lists=\([^&]*\).*/\1/')
+LISTS=$(url_decode "$LISTS_RAW")
+
+# Тип списков
+DOMAIN_TYPE=$(echo "$POST_DATA" | sed 's/.*domain_type=\([^&]*\).*/\1/')
+SUBNET_TYPE=$(echo "$POST_DATA" | sed 's/.*subnet_type=\([^&]*\).*/\1/')
+
+# Домены — приходят как domains=example.com,other.com
+DOMAINS_RAW=$(echo "$POST_DATA" | sed 's/.*domains=\([^&]*\).*/\1/')
+DOMAINS=$(url_decode "$DOMAINS_RAW")
+
+# Подсети
+SUBNETS_RAW=$(echo "$POST_DATA" | sed 's/.*subnets=\([^&]*\).*/\1/')
+SUBNETS=$(url_decode "$SUBNETS_RAW")
+
+# Применяем списки сообщества
+uci del podkop.main.community_lists 2>/dev/null
+if [ -n "$LISTS" ]; then
+    for item in $(echo "$LISTS" | tr ',' ' '); do
+        uci add_list podkop.main.community_lists="$item"
+    done
+fi
+
+# Тип списка доменов
+case "$DOMAIN_TYPE" in
+    disabled|dynamic|file) uci set podkop.main.user_domain_list_type="$DOMAIN_TYPE" ;;
+esac
+
+# Тип списка подсетей
+case "$SUBNET_TYPE" in
+    disabled|dynamic|file) uci set podkop.main.user_subnet_list_type="$SUBNET_TYPE" ;;
+esac
+
+# Пользовательские домены
+uci del podkop.main.user_domains 2>/dev/null
+if [ -n "$DOMAINS" ] && [ "$DOMAIN_TYPE" != "disabled" ]; then
+    for d in $(echo "$DOMAINS" | tr ',' ' '); do
+        [ -n "$d" ] && uci add_list podkop.main.user_domains="$d"
+    done
+fi
+
+# Пользовательские подсети
+uci del podkop.main.user_subnets 2>/dev/null
+if [ -n "$SUBNETS" ] && [ "$SUBNET_TYPE" != "disabled" ]; then
+    for s in $(echo "$SUBNETS" | tr ',' ' '); do
+        [ -n "$s" ] && uci add_list podkop.main.user_subnets="$s"
+    done
+fi
+
+uci commit podkop
+/etc/init.d/podkop restart > /dev/null 2>&1
+
+echo '{"success":true}'

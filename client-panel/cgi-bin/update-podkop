@@ -1,0 +1,35 @@
+#!/bin/sh
+echo "Content-Type: application/json"
+echo ""
+
+read -r POST_DATA
+TOKEN=$(echo "$POST_DATA" | sed 's/.*token=\([^&]*\).*/\1/')
+SAVED=$(head -n 1 /tmp/vpn-auth-token 2>/dev/null)
+EXPIRES=$(sed -n '2p' /tmp/vpn-auth-token 2>/dev/null)
+if [ -n "$EXPIRES" ] && [ "$(date +%s)" -gt "$EXPIRES" ]; then
+    rm -f /tmp/vpn-auth-token
+    SAVED=""
+fi
+if [ "$TOKEN" != "$SAVED" ] || [ -z "$SAVED" ]; then
+    echo '{"success":false,"error":"Не авторизован"}'
+    exit 0
+fi
+
+CURRENT=$(cat /usr/lib/podkop/constants.sh 2>/dev/null | grep PODKOP_VERSION | cut -d'"' -f2)
+wget -qO /tmp/podkop-update.sh https://raw.githubusercontent.com/Jedakaya/podkop-forge/refs/heads/main/install.sh 2>/dev/null
+
+if [ ! -f /tmp/podkop-update.sh ]; then
+    echo '{"success":false,"error":"Не удалось скачать скрипт обновления"}'
+    exit 0
+fi
+
+printf 'y\nn\n' | sh /tmp/podkop-update.sh > /tmp/podkop-update.log 2>&1
+rm -f /tmp/podkop-update.sh
+
+NEW=$(cat /usr/lib/podkop/constants.sh 2>/dev/null | grep PODKOP_VERSION | cut -d'"' -f2)
+
+if [ "$NEW" != "$CURRENT" ]; then
+    echo "{\"success\":true,\"updated\":true,\"old\":\"$CURRENT\",\"new\":\"$NEW\"}"
+else
+    echo "{\"success\":true,\"updated\":false,\"version\":\"$CURRENT\"}"
+fi
