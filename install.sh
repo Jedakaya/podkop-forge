@@ -346,7 +346,10 @@ panel_address() {
     [ -z "$host" ] && host=$(cat /proc/sys/kernel/hostname 2>/dev/null)
     domain=$(uci get dhcp.@dnsmasq[0].domain 2>/dev/null)
     [ -z "$domain" ] && domain="lan"
+    # OpenWrt 25.12 stores the LAN address in CIDR notation, and pasting the
+    # prefix length into a URL produced http://192.168.0.1/24:8080.
     lan_ip=$(uci get network.lan.ipaddr 2>/dev/null)
+    lan_ip="${lan_ip%%/*}"
 
     # Deliberately derived, never hardcoded: dnsmasq serves <hostname>.<domain>,
     # and "openwrt.lan" is only correct while the hostname is still the default.
