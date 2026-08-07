@@ -209,6 +209,11 @@ backup_before_upgrade() {
 
     [ -f /etc/config/podkop ] && cp /etc/config/podkop "$ROLLBACK_DIR/podkop.config"
 
+    # The pid is what makes the health check meaningful. Without it "sing-box
+    # is running" can simply be the old process that was never restarted, so a
+    # broken package would pass as healthy and never be rolled back.
+    pgrep sing-box 2>/dev/null | head -n 1 > "$ROLLBACK_DIR/singbox.pid"
+
     version="$(installed_podkop_version)"
     if [ -z "$version" ]; then
         msg "Не удалось определить установленную версию — откат будет только по конфигу"
@@ -237,14 +242,22 @@ backup_before_upgrade() {
 # again. "The package installed without an error" is not the same thing, and
 # telling the two apart is the entire point of this check.
 upgrade_is_healthy() {
-    local waited=0
+    local waited=0 before after
 
     [ -x /usr/bin/podkop ] || return 1
 
-    while [ "$waited" -lt 45 ]; do
-        if pgrep sing-box >/dev/null 2>&1; then
+    before="$(cat "$ROLLBACK_DIR/singbox.pid" 2>/dev/null)"
+
+    while [ "$waited" -lt 60 ]; do
+        after="$(pgrep sing-box 2>/dev/null | head -n 1)"
+
+        # A pid that is present and different from the one recorded before the
+        # upgrade proves sing-box actually came back up under the new package,
+        # rather than simply never having been restarted.
+        if [ -n "$after" ] && [ "$after" != "$before" ]; then
             return 0
         fi
+
         sleep 3
         waited=$((waited + 3))
     done

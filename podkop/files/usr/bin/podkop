@@ -39,11 +39,15 @@ DNS_FAILOVER_FAILURE_FILE="/var/run/podkop_dns_failover_failures"
 # recovery backoff needs: each failed recovery restart spawns a fresh worker,
 # so without a counter outside the worker the delay would reset every cycle.
 PODKOP_RECOVERY_ATTEMPTS_FILE="/var/run/podkop_recovery_attempts"
-# Encrypted resolvers come first, and they are addressed by IP so they need no
-# bootstrap lookup: when an ISP starts transparently answering port 53, every
-# plain-UDP entry in this list is hijacked exactly like the configured one, so
-# a plain-only list cannot recover from interception.
-DNS_FAILOVER_FALLBACK_LIST="doh:1.1.1.1/dns-query doh:8.8.8.8/dns-query dot:1.1.1.1 udp:77.88.8.8 udp:1.1.1.1 wan:auto"
+# Plain unreachability and interception are different failures and deserve
+# different lists. For plain unreachability the nearest well-behaved resolver
+# wins, and in this audience Yandex is reliably reachable where Cloudflare is
+# often degraded — so the historical order stays.
+DNS_FAILOVER_FALLBACK_LIST="udp:77.88.8.8 udp:1.1.1.1 doh:1.1.1.1/dns-query doh:8.8.8.8/dns-query wan:auto"
+# Under interception every cleartext resolver is answered by the middlebox, so
+# only encrypted transports can help. Addressed by IP literal on purpose: a
+# hostname would need a bootstrap lookup over the very port being hijacked.
+DNS_FAILOVER_ENCRYPTED_LIST="doh:1.1.1.1/dns-query doh:8.8.8.8/dns-query dot:1.1.1.1"
 DNS_PROBE_DOMAIN="google.com"
 # base64url-encoded DNS wire query for "google.com A", used for RFC 8484 DoH
 # probes: dig on OpenWrt frequently lacks +https support, curl never does.
@@ -627,8 +631,13 @@ start_subscription_startup_retry_worker() {
                 # "unchanged" subscription short-circuits before any restart,
                 # which is exactly how a dead router stayed dead.
                 log "Subscription is current but sing-box is still down; restarting podkop" "error"
-                /usr/bin/podkop restart
+
+                # The pidfile goes first: the restart runs stop_main, which
+                # kills whatever the pidfile points at — this very worker, the
+                # parent of the restart it is running. Clearing it first turns
+                # a race into an ordinary sequence.
                 rm -f "$pidfile"
+                /usr/bin/podkop restart
                 exit 0
             fi
 
@@ -665,9 +674,22 @@ dns_failover_probe_dns() {
             doh_path="/$(echo "$dns_server" | cut -d'/' -f2-)"
             doh_host="$(echo "$dns_server" | cut -d'/' -f1)"
         fi
+        # A DoH server named by hostname has to be resolved first — over the
+        # very DNS this probe runs because it is suspect. Pinning the address
+        # through the bootstrap resolver keeps a broken system resolver from
+        # being reported as a broken DoH server.
+        local resolve_opt="" bootstrap_dns doh_ip
+        if ! is_ipv4 "$doh_host"; then
+            config_get bootstrap_dns "settings" "bootstrap_dns_server" "77.88.8.8"
+            doh_ip="$(dig @"$bootstrap_dns" "$doh_host" +short +timeout=3 +tries=1 2> /dev/null |
+                grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' | head -n 1)"
+            [ -n "$doh_ip" ] && resolve_opt="--resolve ${doh_host}:443:${doh_ip}"
+        fi
+
         # RFC 8484 GET. A DoH endpoint that is reachable and healthy answers
         # 200 with an application/dns-message body.
-        curl -s -m 5 -o /dev/null -f \
+        # shellcheck disable=SC2086
+        curl -s -m 5 -o /dev/null -f $resolve_opt \
             -H "accept: application/dns-message" \
             "https://${doh_host}${doh_path}?dns=${DNS_PROBE_WIRE_QUERY}" > /dev/null 2>&1
         return $?
@@ -733,20 +755,18 @@ dns_failover_activate() {
         log "DNS failover: saving original DNS: type=$orig_type server=$orig_server" "info"
     fi
 
-    local i=0 fallback_type fallback_server found=0 entry_type
-    for entry in $DNS_FAILOVER_FALLBACK_LIST; do
-        entry_type="${entry%%:*}"
+    # Cleartext resolvers are pointless while port 53 is being answered by a
+    # middlebox: every one of them would pass the reachability probe and keep
+    # serving the censor's answers.
+    local candidate_list="$DNS_FAILOVER_FALLBACK_LIST"
+    if [ "$intercepted" = "1" ]; then
+        candidate_list="$DNS_FAILOVER_ENCRYPTED_LIST"
+    fi
 
-        # Cleartext resolvers are pointless while port 53 is being answered by
-        # a middlebox: every one of them would pass the reachability probe and
-        # keep serving the censor's answers.
-        if [ "$intercepted" = "1" ] && { [ "$entry_type" = "udp" ] || [ "$entry_type" = "wan" ]; }; then
-            i=$((i + 1))
-            continue
-        fi
-
+    local i=0 fallback_type fallback_server found=0
+    for entry in $candidate_list; do
         if [ "$i" -ge "$dns_failover_index" ]; then
-            fallback_type="$entry_type"
+            fallback_type="${entry%%:*}"
             fallback_server="${entry##*:}"
             found=1
             break
