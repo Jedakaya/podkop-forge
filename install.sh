@@ -41,16 +41,36 @@ pkg_remove() {
     fi
 }
 
+# Bounded on purpose. opkg takes /var/lock/opkg.lock, and a daemon started from
+# a package's postinst inherits that open descriptor and keeps it for as long as
+# it runs; opkg then exits believing the lock is free, and the next opkg command
+# waits for it with no timeout of its own. apk (OpenWrt 25 and later) has no such
+# lock, which matches where this was seen: 23.05 and 24.10 hang, 25.12 does not.
+# It also explains why a second run always worked — with nothing left to install,
+# nobody takes the lock.
+pkg_list_update_raw() {
+    local outfile="$1"
+
+    : > "$outfile"
+
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        run_bounded 180 sh -c "apk update > '$outfile' 2>&1"
+    else
+        run_bounded 180 sh -c "opkg update > '$outfile' 2>&1"
+    fi
+}
+
 pkg_list_update() {
     local out
     local rc
+    local outfile="/tmp/podkop-pkglist.$$"
 
-    if [ "$PKG_IS_APK" -eq 1 ]; then
-        out=$(apk update 2>&1)
-    else
-        out=$(opkg update 2>&1)
-    fi
-    rc=$?
+    pkg_list_update_raw "$outfile"
+    out="$(cat "$outfile" 2>/dev/null)"
+    rm -f "$outfile"
+
+    rc=0
+    [ -n "$out" ] || rc=1
     printf '%s\n' "$out"
 
     [ $rc -eq 0 ] && return 0
@@ -60,14 +80,13 @@ pkg_list_update() {
         sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1
         sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1
 
-        if [ "$PKG_IS_APK" -eq 1 ]; then
-            out=$(apk update 2>&1)
-        else
-            out=$(opkg update 2>&1)
-        fi
-        rc=$?
-        printf '%s
-' "$out"
+        pkg_list_update_raw "$outfile"
+        out="$(cat "$outfile" 2>/dev/null)"
+        rm -f "$outfile"
+
+        rc=0
+        [ -n "$out" ] || rc=1
+        printf '%s\n' "$out"
 
         sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1
         sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1
