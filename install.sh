@@ -93,7 +93,7 @@ pkg_index_is_usable() {
     local count
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        count=$(printf '%s' "$out" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) distinct packages available.*//p' | tail -n 1)
+        count=$(printf '%s' "$out" | sed -n 's/.*[^0-9]\([0-9][0-9]*\) distinct packages available.*/\1/p' | tail -n 1)
         [ -n "$count" ] && [ "$count" -gt 0 ]
         return $?
     fi
@@ -190,9 +190,9 @@ ROLLBACK_DIR="/tmp/podkop-rollback"
 
 installed_podkop_version() {
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        apk list --installed 2>/dev/null | sed -n 's/^podkop-\([0-9][^ ]*\)-r[0-9]* .*//p' | head -n 1
+        apk list --installed 2>/dev/null | sed -n 's/^podkop-\([0-9][^ ]*\)-r[0-9]* .*/\1/p' | head -n 1
     else
-        opkg list-installed 2>/dev/null | sed -n 's/^podkop - \([0-9][^ ]*\)$//p' | head -n 1
+        opkg list-installed 2>/dev/null | sed -n 's/^podkop - \([0-9][^ ]*\)$/\1/p' | head -n 1
     fi
 }
 
@@ -759,7 +759,11 @@ offer_sing_box_extended() {
     msg "Установить/обновить sing-box-extended сейчас? [Y/n]"
 
     while true; do
-        read -r -p '' EXTENDED
+        if ! read -r -p '' EXTENDED; then
+            msg "Ответ не получен — sing-box-extended не устанавливается."
+            break
+        fi
+
         case "$EXTENDED" in
         "" | y | Y | yes | Yes | YES)
             msg "Запускаю установщик sing-box-extended (github.com/EikeiDev/OpenWRT-sing-box-extended)..."
@@ -782,13 +786,116 @@ offer_sing_box_extended() {
     done
 }
 
+SING_BOX_EXTENDED_RELEASES="https://api.github.com/repos/shtorm-7/sing-box-extended/releases?per_page=30"
+
+sing_box_installed_version() {
+    sing-box version 2>/dev/null | head -n 1 | awk '{print $3}'
+}
+
+sing_box_extended_arch() {
+    grep DISTRIB_ARCH /etc/openwrt_release 2>/dev/null | cut -d"'" -f2
+}
+
+# Newest stable asset for this router's architecture. Release candidates and
+# betas are skipped: sing-box sits in the path of every packet here, and a
+# prerelease is not something to hand a client's router unasked.
+sing_box_extended_latest_url() {
+    local arch ext
+
+    arch="$(sing_box_extended_arch)"
+    [ -z "$arch" ] && return 1
+
+    ext="ipk"
+    [ "$PKG_IS_APK" -eq 1 ] && ext="apk"
+
+    wget -qO- "$SING_BOX_EXTENDED_RELEASES" 2>/dev/null |
+        grep -o "https://[^\"]*sing-box-extended_[^\"]*_openwrt_${arch}\.${ext}" |
+        grep -viE '(\-rc|\-beta|\-alpha)' |
+        head -n 1
+}
+
+sing_box_extended_version_from_url() {
+    basename "$1" | sed 's/^sing-box-extended_//; s/_openwrt_.*$//'
+}
+
+# Upgrades in place with --upgrade and never deletes first. The upstream
+# installer removes sing-box before installing and wants 25 MB free, which on a
+# nearly full router means the old one is gone and the new one does not fit.
+sing_box_extended_upgrade() {
+    local url latest installed tmpfile size_kb avail
+
+    msg "Проверяю обновления sing-box-extended..."
+
+    url="$(sing_box_extended_latest_url)"
+    if [ -z "$url" ]; then
+        msg "Не удалось узнать последнюю версию sing-box-extended — оставляем установленную."
+        return 0
+    fi
+
+    latest="$(sing_box_extended_version_from_url "$url")"
+    installed="$(sing_box_installed_version)"
+
+    if [ "$latest" = "$installed" ]; then
+        msg "sing-box-extended $installed — последняя версия."
+        return 0
+    fi
+
+    msg "Доступна версия sing-box-extended: $latest (установлена $installed)"
+    msg "Обновить? y/n"
+    while true; do
+        if ! read -r -p '' SBX_ANSWER; then
+            msg "Ответ не получен — sing-box-extended остаётся версии $installed."
+            return 0
+        fi
+        case "$SBX_ANSWER" in
+        y|Y) break ;;
+        n|N)
+            msg "Пропускаем обновление sing-box-extended."
+            return 0
+            ;;
+        *) echo "Введите y или n" ;;
+        esac
+    done
+
+    tmpfile="/tmp/sing-box-extended-$latest.$$"
+    if ! wget -q -O "$tmpfile" "$url" || [ ! -s "$tmpfile" ]; then
+        rm -f "$tmpfile"
+        msg "Не удалось скачать sing-box-extended $latest — оставляем установленную $installed."
+        return 0
+    fi
+
+    # Checked with the package already in RAM, so its real size is known and the
+    # decision is made before anything on flash is touched.
+    size_kb="$(du -k "$tmpfile" 2>/dev/null | awk '{print $1}')"
+    avail="$(overlay_free_kb)"
+    if [ -n "$avail" ] && [ -n "$size_kb" ] && [ "$avail" -lt "$((size_kb + 2048))" ]; then
+        rm -f "$tmpfile"
+        msg "Недостаточно места для обновления sing-box-extended"
+        msg "Доступно: $avail КБ  |  Нужно примерно: $((size_kb + 2048)) КБ"
+        msg "Установленная версия $installed не тронута."
+        report_flash_usage
+        return 0
+    fi
+
+    msg "Устанавливаю sing-box-extended $latest..."
+    if pkg_install "$tmpfile"; then
+        msg "sing-box-extended обновлён: $installed -> $latest"
+    else
+        msg "Обновление sing-box-extended не удалось — установленная версия осталась на месте."
+    fi
+
+    rm -f "$tmpfile"
+    return 0
+}
+
 sing_box() {
     if pkg_is_installed "^sing-box"; then
         sing_box_version=$(sing-box version | head -n 1 | awk '{print $3}')
 
         case "$sing_box_version" in
         *extended*)
-            msg "Обнаружен sing-box-extended ($sing_box_version, поддерживает XHTTP) — оставляем как есть."
+            msg "Обнаружен sing-box-extended ($sing_box_version, поддерживает XHTTP)."
+            sing_box_extended_upgrade
             return
             ;;
         esac
