@@ -219,7 +219,9 @@ installed_podkop_version() {
     if [ "$PKG_IS_APK" -eq 1 ]; then
         apk list --installed 2>/dev/null | sed -n 's/^podkop-\([0-9][^ ]*\)-r[0-9]* .*/\1/p' | head -n 1
     else
-        opkg list-installed 2>/dev/null | sed -n 's/^podkop - \([0-9][^ ]*\)$/\1/p' | head -n 1
+        # The release suffix has to come off here exactly as it does on the apk
+        # side, otherwise the rollback URL asks for podkop_0.7.68-r1-r1_all.ipk.
+        opkg list-installed 2>/dev/null | sed -n 's/^podkop - \([0-9][^ ]*\)-r[0-9]*$/\1/p' | head -n 1
     fi
 }
 
@@ -847,6 +849,17 @@ sing_box_installed_version() {
     sing-box version 2>/dev/null | head -n 1 | awk '{print $3}'
 }
 
+# opkg identifies a package file by its extension and treats anything else as a
+# package *name*, answering "Unknown package". apk goes by content, which is why
+# the missing suffix only ever broke ipk routers.
+pkg_file_ext() {
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        echo "apk"
+    else
+        echo "ipk"
+    fi
+}
+
 sing_box_extended_arch() {
     grep DISTRIB_ARCH /etc/openwrt_release 2>/dev/null | cut -d"'" -f2
 }
@@ -877,7 +890,7 @@ sing_box_extended_version_from_url() {
 # installer removes sing-box before installing and wants 25 MB free, which on a
 # nearly full router means the old one is gone and the new one does not fit.
 sing_box_extended_upgrade() {
-    local url latest installed tmpfile
+    local url latest installed tmpfile keep
 
     msg "Проверяю обновления sing-box-extended..."
 
@@ -914,7 +927,7 @@ sing_box_extended_upgrade() {
 
     # Straight into RAM. The archive costs nothing on flash, and its size says
     # nothing useful about the cost of installing it.
-    tmpfile="/tmp/sing-box-extended-$latest.$$"
+    tmpfile="/tmp/sing-box-extended-$latest.$$.$(pkg_file_ext)"
     msg "Скачиваю пакет в RAM..."
     if ! wget -q -O "$tmpfile" "$url" || [ ! -s "$tmpfile" ]; then
         rm -f "$tmpfile"
@@ -930,7 +943,7 @@ sing_box_extended_upgrade() {
     # changes nothing on disk.
     if ! pkg_install_would_succeed "$tmpfile"; then
         rm -f "$tmpfile"
-        msg "Пробная установка не прошла — вероятно, действительно не хватает места."
+        msg "Пробная установка не прошла, причина выше."
         msg "Установленная версия $installed не тронута."
         report_flash_usage
         return 0
@@ -1002,10 +1015,15 @@ sing_box_extended_upgrade() {
     else
         msg ""
         msg "УСТАНОВКА НЕ ПРОШЛА, И СТАРЫЙ SING-BOX УЖЕ УДАЛЁН."
-        msg "Пакет сохранён: /tmp/sing-box-extended-$latest.apk"
-        msg "Поставьте вручную:  apk add --allow-untrusted /tmp/sing-box-extended-$latest.apk"
+        keep="/tmp/sing-box-extended-$latest.$(pkg_file_ext)"
+        cp "$tmpfile" "$keep" 2>/dev/null
+        msg "Пакет сохранён: $keep"
+        if [ "$PKG_IS_APK" -eq 1 ]; then
+            msg "Поставьте вручную:  apk add --allow-untrusted $keep"
+        else
+            msg "Поставьте вручную:  opkg install $keep"
+        fi
         msg "Файл лежит в RAM и не переживёт перезагрузку — не перезагружайтесь до установки."
-        cp "$tmpfile" "/tmp/sing-box-extended-$latest.apk" 2>/dev/null
     fi
 
     /etc/init.d/podkop start >/dev/null 2>&1
