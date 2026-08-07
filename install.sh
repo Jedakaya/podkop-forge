@@ -361,25 +361,44 @@ panel_address() {
 ' "$lan_ip" "$PANEL_PORT"
 }
 
+# raw.githubusercontent.com serves branch paths from an edge cache and ignores
+# query strings, so a "?nocache=" parameter changed nothing — a stale panel was
+# indistinguishable from a fresh one, and the promise that podkop and the panel
+# update together rests on this download. A commit hash in the path is immutable
+# and cannot be served stale.
+#
+# Resolution failure falls back to the branch URL, so the worst case is exactly
+# the behaviour that existed before.
+panel_raw_base() {
+    local sha
+
+    sha="$(wget -qO- "https://api.github.com/repos/Jedakaya/podkop-forge/commits/main" 2>/dev/null |
+        grep -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' |
+        head -n 1 | grep -o '[0-9a-f]\{40\}')"
+
+    if [ -n "$sha" ]; then
+        echo "https://raw.githubusercontent.com/Jedakaya/podkop-forge/$sha/client-panel"
+        return 0
+    fi
+
+    echo "$PANEL_RAW_BASE"
+}
+
 download_panel_into() {
     local dest="$1"
-    local name bust
+    local name base
 
     mkdir -p "$dest/cgi-bin" || return 1
 
-    # raw.githubusercontent.com serves branch files from an edge cache, and a
-    # stale copy is indistinguishable from a fresh one. A changing query string
-    # gives each run its own cache key, which is the whole point of installing
-    # the panel from the same run that updates podkop.
-    bust="$(date +%s)"
+    base="$(panel_raw_base)"
 
-    if ! wget -q -O "$dest/index.html" "$PANEL_RAW_BASE/index.html?nocache=$bust"; then
+    if ! wget -q -O "$dest/index.html" "$base/index.html"; then
         return 1
     fi
     [ -s "$dest/index.html" ] || return 1
 
     for name in $PANEL_CGI_FILES; do
-        if ! wget -q -O "$dest/cgi-bin/$name" "$PANEL_RAW_BASE/cgi-bin/$name?nocache=$bust"; then
+        if ! wget -q -O "$dest/cgi-bin/$name" "$base/cgi-bin/$name"; then
             return 1
         fi
         [ -s "$dest/cgi-bin/$name" ] || return 1
