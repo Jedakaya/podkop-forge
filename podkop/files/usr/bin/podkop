@@ -800,16 +800,37 @@ dns_health_check() {
     config_get dns_type "settings" "dns_type"
     config_get dns_server "settings" "dns_server"
 
+    # Checked before anything else so it is reported even for a local resolver.
+    # A local DNS server cannot be blocked by the provider — but its upstream
+    # can, and a hijacked upstream poisons every answer the local resolver
+    # hands out. Skipping the check entirely left that completely invisible.
+    local intercepted=0
+    if dns_plain_port53_intercepted; then
+        intercepted=1
+    fi
+
     local dns_host="${dns_server%%/*}"
     case "$dns_host" in
-        127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
+    127.* | 10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[0-1].*)
+        if [ "$intercepted" -eq 0 ]; then
             log "DNS health check: $dns_server is a local/private address, skipping failover" "debug"
             rm -f "$DNS_FAILOVER_FAILURE_FILE"
             return 0
-            ;;
+        fi
+
+        local dns_failover_on_local
+        config_get_bool dns_failover_on_local "settings" "dns_failover_on_local" 0
+
+        if [ "$dns_failover_on_local" -eq 0 ]; then
+            log "DNS health check: port 53 is intercepted upstream — the answers your local resolver $dns_server forwards cannot be trusted. Enable dns_failover_on_local to switch to encrypted DNS automatically" "warn"
+            rm -f "$DNS_FAILOVER_FAILURE_FILE"
+            return 0
+        fi
+
+        log "DNS health check: port 53 is intercepted upstream and dns_failover_on_local is set — treating local resolver $dns_server as compromised" "warn"
+        ;;
     esac
 
-    local intercepted=0
     if dns_failover_probe_dns "$dns_type" "$dns_server"; then
         if [ "$dns_type" != "udp" ] && [ -n "$dns_type" ]; then
             rm -f "$DNS_FAILOVER_FAILURE_FILE"
@@ -818,15 +839,14 @@ dns_health_check() {
         fi
 
         # Plain DNS answered — which proves nothing while a middlebox is
-        # answering on behalf of every resolver. Only the canary can tell the
-        # two apart.
-        if ! dns_plain_port53_intercepted; then
+        # answering on behalf of every resolver. Only the canary, already run
+        # above, can tell the two apart.
+        if [ "$intercepted" -eq 0 ]; then
             rm -f "$DNS_FAILOVER_FAILURE_FILE"
             log "DNS health check: $dns_type/$dns_server is reachable" "debug"
             return 0
         fi
 
-        intercepted=1
         log "DNS health check: $dns_server answers, but port 53 is intercepted upstream — its answers cannot be trusted" "warn"
     fi
 
