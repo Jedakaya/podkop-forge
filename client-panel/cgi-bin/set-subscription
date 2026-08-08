@@ -19,6 +19,13 @@ if ! echo "$SUB_URL" | grep -qE '^https?://'; then
     echo '{"success":false,"error":"Некорректная ссылка"}'
     exit 0
 fi
+# Секция переключается на подписку здесь, а не при первичной настройке
+# роутера: с типом subscription и пустой ссылкой podkop завершается фатально
+# на старте, поэтому до первой вставки ссылки он должен оставаться в
+# исходном состоянии.
+uci set podkop.main.connection_type='proxy'
+uci set podkop.main.proxy_config_type='subscription'
+uci -q delete podkop.main.proxy_string
 uci set podkop.main.subscription_url="$SUB_URL"
 uci commit podkop
 /etc/init.d/podkop restart > /dev/null 2>&1
