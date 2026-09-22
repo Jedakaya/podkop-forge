@@ -9,6 +9,12 @@ COUNT=3
 PKG_IS_APK=0
 command -v apk >/dev/null 2>&1 && PKG_IS_APK=1
 
+# Output of the last package transaction. Kept in a file rather than a variable
+# so it can be both shown to the user and inspected afterwards for the reason of
+# a failure — running out of flash is only one of them, and guessing that reason
+# from df was wrong.
+PKG_LAST_OUTPUT="/tmp/podkop-pkg-last.log"
+
 rm -rf "$DOWNLOAD_DIR"
 mkdir -p "$DOWNLOAD_DIR"
 
@@ -31,14 +37,30 @@ pkg_is_installed () {
 
 pkg_remove() {
     local pkg_name="$1"
+    local rc
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
         # TODO: check --force-depends flag
         # Nothing here: https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet
-        apk del "$pkg_name"
+        #
+        # A world file left broken by an earlier failed transaction blocks
+        # removals exactly as it blocks installs, so the same repair applies:
+        # apk refuses to build any transaction at all until world can be
+        # satisfied. See apk_world_unpin.
+        apk del "$pkg_name" > "$PKG_LAST_OUTPUT" 2>&1
+        rc=$?
+        if [ "$rc" -ne 0 ] && apk_world_unpin "$PKG_LAST_OUTPUT"; then
+            msg "Повторяю удаление..."
+            apk del "$pkg_name" > "$PKG_LAST_OUTPUT" 2>&1
+            rc=$?
+        fi
     else
-        opkg remove --force-depends "$pkg_name"
+        opkg remove --force-depends "$pkg_name" > "$PKG_LAST_OUTPUT" 2>&1
+        rc=$?
     fi
+
+    cat "$PKG_LAST_OUTPUT" 2>/dev/null
+    return $rc
 }
 
 # Bounded on purpose. opkg takes /var/lock/opkg.lock, and a daemon started from
@@ -158,14 +180,73 @@ fix_github_dns() {
     /etc/init.d/dnsmasq restart >/dev/null 2>&1
 }
 
+# apk writes /etc/apk/world when a transaction starts and leaves the entry there
+# when the transaction then fails. For a package installed from a file the entry
+# is pinned to that file's checksum; the file was downloaded into RAM and is gone
+# on the next run, so from then on world cannot be satisfied at all and *every*
+# later apk operation ends in "unable to select packages ... breaks:
+# world[<name><checksum>]" — installs, upgrades and even apk del, whatever the
+# package. That is how a sing-box-extended upgrade that ran out of flash blocks
+# podkop updates afterwards, with an error mentioning neither podkop nor space.
+#
+# When apk names such an entry, the pin is dropped and the plain package name is
+# kept in world: the installed version stays installed and selectable, and
+# nothing else in world is touched.
+apk_world_unpin() {
+    local logfile="$1"
+    local names name changed=0
+
+    [ -f /etc/apk/world ] || return 1
+    [ -f "$logfile" ] || return 1
+
+    names="$(sed -n 's/.*breaks: *world\[\([A-Za-z0-9._+-]\{1,\}\)[<>=~].*/\1/p' "$logfile" | sort -u)"
+    [ -n "$names" ] || return 1
+
+    for name in $names; do
+        grep -q "^$name[<>=~]" /etc/apk/world || continue
+        [ "$changed" -eq 0 ] && cp /etc/apk/world /etc/apk/world.podkop.bak 2>/dev/null
+        sed -i "s|^$name[<>=~].*|$name|" /etc/apk/world
+        changed=1
+        msg "В /etc/apk/world снята привязка $name к файлу пакета, которого больше нет."
+    done
+
+    [ "$changed" -eq 1 ] || return 1
+
+    msg "Копия прежнего world: /etc/apk/world.podkop.bak"
+    return 0
+}
+
+# One apk run, logged, retried once if the only thing in the way was a world
+# file left broken by an earlier failed transaction.
+apk_add_logged() {
+    local rc
+
+    apk add "$@" > "$PKG_LAST_OUTPUT" 2>&1
+    rc=$?
+
+    if [ "$rc" -ne 0 ] && apk_world_unpin "$PKG_LAST_OUTPUT"; then
+        msg "Повторяю операцию..."
+        apk add "$@" > "$PKG_LAST_OUTPUT" 2>&1
+        rc=$?
+    fi
+
+    return $rc
+}
+
 pkg_install() {
     local pkg_file="$1"
+    local rc
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        apk add --allow-untrusted --upgrade "$pkg_file"
+        apk_add_logged --allow-untrusted --upgrade "$pkg_file"
+        rc=$?
     else
-        opkg install "$pkg_file"
+        opkg install "$pkg_file" > "$PKG_LAST_OUTPUT" 2>&1
+        rc=$?
     fi
+
+    cat "$PKG_LAST_OUTPUT" 2>/dev/null
+    return $rc
 }
 
 # Dry run of the same transaction. The package manager accounts for the space
@@ -176,11 +257,13 @@ pkg_install_would_succeed() {
     local out rc
 
     if [ "$PKG_IS_APK" -eq 1 ]; then
-        out=$(apk add --allow-untrusted --upgrade --simulate "$pkg_file" 2>&1)
+        apk_add_logged --allow-untrusted --upgrade --simulate "$pkg_file"
+        rc=$?
     else
-        out=$(opkg install --noaction "$pkg_file" 2>&1)
+        opkg install --noaction "$pkg_file" > "$PKG_LAST_OUTPUT" 2>&1
+        rc=$?
     fi
-    rc=$?
+    out="$(cat "$PKG_LAST_OUTPUT" 2>/dev/null)"
 
     [ $rc -eq 0 ] && return 0
 
@@ -1184,8 +1267,18 @@ sing_box_extended_upgrade() {
 }
 
 # True when the last package operation failed for lack of disk space rather
-# than for any other reason.
+# than for any other reason. The package manager says so in its own output, and
+# that is the only reliable source: an upgrade that needs room for the whole new
+# version next to the old one fails at 40 MB free just as it does at 6 MB, so the
+# free-space threshold this used to compare against reported "not a space
+# problem" on the very failures it was written for. The threshold is kept only
+# as a fallback for the case where no output survived.
 sing_box_extended_out_of_space() {
+    if [ -f "$PKG_LAST_OUTPUT" ]; then
+        grep -qiE 'no space left|not enough space|out of space|нет места' "$PKG_LAST_OUTPUT" && return 0
+        grep -qiE 'ERROR|failed' "$PKG_LAST_OUTPUT" && return 1
+    fi
+
     [ -n "$(overlay_free_kb)" ] || return 1
     [ "$(overlay_free_kb)" -lt 30720 ]
 }
