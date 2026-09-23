@@ -1082,6 +1082,7 @@ start_main() {
     config_foreach add_cron_job "section"
     config_foreach add_subscription_cron_job "section"
     add_dns_health_check_cron_job
+    add_dns_chain_watchdog_cron_job
 
     # sing-box
     local sing_box_config_rc=0
@@ -1356,6 +1357,100 @@ dnsmasq_configure() {
     /etc/init.d/dnsmasq restart
 }
 
+# True while /etc/config/dhcp still sends dnsmasq's queries into sing-box.
+# Same criteria the diagnostics tab uses, so both agree on what "configured"
+# means.
+dns_chain_is_intact() {
+    local server_list server noresolv cachesize found=0
+
+    server_list="$(uci_get "dhcp" "@dnsmasq[0]" "server")"
+    for server in $server_list; do
+        if [ "$server" = "$SB_DNS_INBOUND_ADDRESS" ]; then
+            found=1
+            break
+        fi
+    done
+
+    [ "$found" -eq 1 ] || return 1
+
+    noresolv="$(uci_get "dhcp" "@dnsmasq[0]" "noresolv")"
+    cachesize="$(uci_get "dhcp" "@dnsmasq[0]" "cachesize")"
+
+    [ "$noresolv" = "1" ] || return 1
+    [ "$cachesize" = "0" ] || return 1
+
+    return 0
+}
+
+# Something outside podkop can take the DNS chain away while podkop is running:
+# a vendor firmware's own configuration manager rewriting /etc/config/dhcp, a
+# package restoring its defaults, a hand edit in LuCI. dnsmasq then answers
+# from the provider's resolver, clients receive real addresses instead of
+# FakeIP, and every rule that routes by domain stops seeing their traffic —
+# podkop keeps running, its own checks stay green, and nothing is proxied. Seen
+# on an SNR-CPE-AX2 where the tunnel worked for a couple of minutes after each
+# restart and then went direct.
+#
+# The configuration is put back rather than merely reported: an unattended
+# router has nobody to read the report. Whatever was found in `server` becomes
+# the restore target unless podkop already holds one, so `podkop stop` still
+# gives the router back the resolver its owner had.
+dns_chain_watchdog() {
+    local dont_touch_dhcp shutdown_correctly current_servers server
+
+    config_get_bool dont_touch_dhcp "settings" "dont_touch_dhcp" 0
+    [ "$dont_touch_dhcp" -eq 0 ] || return 0
+
+    # start sets this to 0, stop sets it to 1: only a running podkop owns the
+    # DNS chain, and a stopped one must not fight the resolver back.
+    config_get shutdown_correctly "settings" "shutdown_correctly" 1
+    [ "$shutdown_correctly" -eq 0 ] || return 0
+
+    if dns_chain_is_intact; then
+        log "DNS chain watchdog: dnsmasq still forwards to sing-box" "debug"
+        return 0
+    fi
+
+    log "DNS chain watchdog: dnsmasq no longer forwards to sing-box — restoring it" "warn"
+    log "DNS chain watchdog: found server='$(uci_get "dhcp" "@dnsmasq[0]" "server")' noresolv='$(uci_get "dhcp" "@dnsmasq[0]" "noresolv")' cachesize='$(uci_get "dhcp" "@dnsmasq[0]" "cachesize")'" "warn"
+
+    current_servers="$(uci_get "dhcp" "@dnsmasq[0]" "server")"
+    if [ -n "$current_servers" ]; then
+        if [ -z "$(uci_get "dhcp" "@dnsmasq[0]" "podkop_server")" ]; then
+            for server in $current_servers; do
+                [ "$server" = "$SB_DNS_INBOUND_ADDRESS" ] && continue
+                uci_add_list "dhcp" "@dnsmasq[0]" "podkop_server" "$server"
+            done
+        fi
+        uci_remove "dhcp" "@dnsmasq[0]" "server"
+    fi
+
+    [ -z "$(uci_get "dhcp" "@dnsmasq[0]" "podkop_noresolv")" ] &&
+        backup_dnsmasq_config_option "noresolv" "podkop_noresolv"
+    [ -z "$(uci_get "dhcp" "@dnsmasq[0]" "podkop_cachesize")" ] &&
+        backup_dnsmasq_config_option "cachesize" "podkop_cachesize"
+
+    uci_add_list "dhcp" "@dnsmasq[0]" "server" "$SB_DNS_INBOUND_ADDRESS"
+    uci_set "dhcp" "@dnsmasq[0]" "noresolv" 1
+    uci_set "dhcp" "@dnsmasq[0]" "cachesize" 0
+    uci_commit "dhcp"
+
+    /etc/init.d/dnsmasq restart
+    log "DNS chain watchdog: dnsmasq restarted with sing-box as its only upstream" "warn"
+}
+
+add_dns_chain_watchdog_cron_job() {
+    local dont_touch_dhcp
+    config_get_bool dont_touch_dhcp "settings" "dont_touch_dhcp" 0
+    [ "$dont_touch_dhcp" -eq 0 ] || return 0
+
+    (crontab -l | grep -v "/usr/bin/podkop dns_chain_watchdog") | {
+        cat
+        echo "*/2 * * * * /usr/bin/podkop dns_chain_watchdog"
+    } | crontab -
+    log "DNS chain watchdog cron job added (every 2 minutes)"
+}
+
 dnsmasq_restore() {
     log "Restoring the dnsmasq configuration"
     local shutdown_correctly
@@ -1453,7 +1548,7 @@ add_cron_job() {
 }
 
 remove_cron_job() {
-    (crontab -l | grep -v "/usr/bin/podkop list_update" | grep -v "/usr/bin/podkop subscription_update" | grep -v "/usr/bin/podkop dns_health_check") | crontab -
+    (crontab -l | grep -v "/usr/bin/podkop list_update" | grep -v "/usr/bin/podkop subscription_update" | grep -v "/usr/bin/podkop dns_health_check" | grep -v "/usr/bin/podkop dns_chain_watchdog") | crontab -
     log "The cron job removed"
 }
 
@@ -4333,6 +4428,7 @@ Available commands:
     get_sing_box_status     Get sing-box service status
     get_system_info         Get system information in JSON format
     check_dns_available     Check DNS server availability
+    dns_chain_watchdog      Re-point dnsmasq at sing-box if something took it away
     global_check            Run global system check
 EOF
 }
@@ -4417,6 +4513,9 @@ check_dns_available)
     ;;
 dns_health_check)
     dns_health_check
+    ;;
+dns_chain_watchdog)
+    dns_chain_watchdog
     ;;
 dns_failover_retry_original)
     acquire_lifecycle_lock
