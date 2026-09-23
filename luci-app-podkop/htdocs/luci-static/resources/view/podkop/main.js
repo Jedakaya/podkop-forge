@@ -3054,10 +3054,14 @@ async function runFakeIPCheck() {
   };
   const routerUnreachable = !routerData || routerData.unreachable === true;
   const testServiceUnreachable = routerUnreachable && !browserFakeIPData;
+  const browserCheckUnreachable = !browserFakeIPData;
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood = checks.router || checks.browserFakeIP || checks.differentIP;
   const { state, description } = testServiceUnreachable ? {
     state: "warning",
+    description: _("FakeIP test service is unreachable, check skipped")
+  } : browserCheckUnreachable ? {
+    state: checks.router ? "warning" : "error",
     description: _("FakeIP test service is unreachable, check skipped")
   } : getMeta({ atLeastOneGood, allGood });
   if (testServiceUnreachable) {
@@ -3098,7 +3102,11 @@ async function runFakeIPCheck() {
         key: checks.router ? _("Router DNS is routed through sing-box") : _("Router DNS is not routed through sing-box"),
         value: ""
       },
-      {
+      browserCheckUnreachable ? {
+        state: "warning",
+        key: _("Could not reach the FakeIP test service"),
+        value: FAKEIP_CHECK_DOMAIN
+      } : {
         state: checks.browserFakeIP ? "success" : "error",
         key: checks.browserFakeIP ? _("Browser is using FakeIP correctly") : _("Browser is not using FakeIP"),
         value: ""

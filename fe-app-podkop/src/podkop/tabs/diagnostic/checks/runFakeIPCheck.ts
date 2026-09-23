@@ -55,6 +55,13 @@ export async function runFakeIPCheck() {
   // FakeIP endpoint is cut by SNI — requiring both to fail meant the check
   // never recognised the very situation it was written for.
   const testServiceUnreachable = routerUnreachable && !browserFakeIPData;
+  // The router reaching the test service says nothing about the browser being
+  // able to reach it. The page runs wherever LuCI was opened — often a machine
+  // on a different network, or one whose DPI cuts the endpoint by SNI — so a
+  // request that never arrived is not evidence that the browser ignores
+  // FakeIP. Painting it red sent people hunting a router fault that did not
+  // exist, while the router's own line was green right above it.
+  const browserCheckUnreachable = !browserFakeIPData;
 
   const allGood = checks.router && checks.browserFakeIP && checks.differentIP;
   const atLeastOneGood =
@@ -65,7 +72,12 @@ export async function runFakeIPCheck() {
         state: 'warning' as const,
         description: _('FakeIP test service is unreachable, check skipped'),
       }
-    : getMeta({ atLeastOneGood, allGood });
+    : browserCheckUnreachable
+      ? {
+          state: (checks.router ? 'warning' : 'error') as const,
+          description: _('FakeIP test service is unreachable, check skipped'),
+        }
+      : getMeta({ atLeastOneGood, allGood });
 
   if (testServiceUnreachable) {
     const local = routerData as {
@@ -115,13 +127,21 @@ export async function runFakeIPCheck() {
           : _('Router DNS is not routed through sing-box'),
         value: '',
       },
-      {
-        state: checks.browserFakeIP ? 'success' : 'error',
-        key: checks.browserFakeIP
-          ? _('Browser is using FakeIP correctly')
-          : _('Browser is not using FakeIP'),
-        value: '',
-      },
+      browserCheckUnreachable
+        ? {
+            state: 'warning' as const,
+            key: _('Could not reach the FakeIP test service'),
+            value: FAKEIP_CHECK_DOMAIN,
+          }
+        : {
+            state: checks.browserFakeIP
+              ? ('success' as const)
+              : ('error' as const),
+            key: checks.browserFakeIP
+              ? _('Browser is using FakeIP correctly')
+              : _('Browser is not using FakeIP'),
+            value: '',
+          },
       ...insertIf<IDiagnosticsChecksItem>(checks.browserFakeIP, [
         {
           state: checks.differentIP ? 'success' : 'error',

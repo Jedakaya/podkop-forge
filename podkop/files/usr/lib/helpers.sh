@@ -1,15 +1,37 @@
-# Check if string is valid IPv4
+# POSIX stand-in for bash's [[ "$str" =~ $re ]]. Not every busybox on OpenWrt
+# is built with the bash-compatible regex operator: on an SNR-CPE-AX2 running
+# OpenWrt 25.12 ash answers "unknown operand" and the test comes out false, so
+# every check built on it silently reported "no" — a resolver address was taken
+# for a domain, and check_proxy could not recognise an IPv4 answer at all.
+# grep is always present and always behaves the same.
+str_matches_ere() {
+    local str="$1"
+    local regex="$2"
+
+    # One matching line must not make a multi-line value match as a whole.
+    case "$str" in
+    *"
+"*) return 1 ;;
+    esac
+
+    printf '%s' "$str" | grep -qE "$regex"
+}
+
+# One 0-255 octet, for the dotted-quad patterns below. The previous patterns
+# were written with \d and , neither of which exists in POSIX ERE.
+IPV4_OCTET_ERE='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+
 is_ipv4() {
     local ip="$1"
-    local regex="^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$"
-    [[ "$ip" =~ $regex ]]
+
+    str_matches_ere "$ip" "^($IPV4_OCTET_ERE\.){3}$IPV4_OCTET_ERE$"
 }
 
 # Check if string is valid IPv4 with CIDR mask
 is_ipv4_cidr() {
     local ip="$1"
-    local regex="^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}(\/(3[0-2]|2[0-9]|1[0-9]|[0-9]))$"
-    [[ "$ip" =~ $regex ]]
+
+    str_matches_ere "$ip" "^($IPV4_OCTET_ERE\.){3}$IPV4_OCTET_ERE/(3[0-2]|[12]?[0-9])$"
 }
 
 is_ipv4_ip_or_ipv4_cidr() {
@@ -18,9 +40,8 @@ is_ipv4_ip_or_ipv4_cidr() {
 
 is_domain() {
     local str="$1"
-    local regex='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
 
-    [[ "$str" =~ $regex ]]
+    str_matches_ere "$str" '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
 }
 
 is_domain_suffix() {
@@ -43,9 +64,8 @@ is_base64() {
 # Checks if the given string looks like a Shadowsocks userinfo
 is_shadowsocks_userinfo_format() {
     local str="$1"
-    local regex='^[^:]+:[^:]+(:[^:]+)?$'
 
-    [[ "$str" =~ $regex ]]
+    str_matches_ere "$str" '^[^:]+:[^:]+(:[^:]+)?$'
 }
 
 # Compares the current package version with the required minimum

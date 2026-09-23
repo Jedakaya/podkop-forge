@@ -3149,6 +3149,52 @@ nft_list_all_traffic_from_ip() {
 }
 
 # Diagnotics
+# `sing-box tools fetch` starts a second sing-box from the configuration it is
+# handed, and since 1.14 that start opens experimental.cache_file — a database
+# the running daemon holds exclusively. The check then dies with
+# "start service: initialize cache-file: timeout" after nine seconds and
+# reports an empty answer on a router whose tunnel is perfectly healthy; the
+# clash_api controller and every inbound would collide in the same way.
+# Asking what address the proxy exits from needs only the outbounds and a route
+# into them, so the probe runs on a stripped copy of the configuration. Nothing
+# here is specific to 1.14: the same stripped configuration is valid for the
+# older versions, and the full configuration is still used if it cannot be
+# built.
+check_proxy_probe_config() {
+    local sing_box_config_path="$1"
+    local out_path="$2"
+    local proxy_tag dns_server
+
+    command -v jq > /dev/null 2>&1 || return 1
+
+    proxy_tag="$(jq -r 'first(.outbounds[] | select(.type == "selector") | .tag)
+        // first(.outbounds[] | select(.type == "urltest") | .tag) // empty' \
+        "$sing_box_config_path" 2> /dev/null)"
+    [ -z "$proxy_tag" ] && return 1
+
+    dns_server="$(jq -r 'first(.dns.servers[] | select(.type == "udp") | .server) // empty' \
+        "$sing_box_config_path" 2> /dev/null)"
+    if [ -z "$dns_server" ]; then
+        config_get dns_server "settings" "bootstrap_dns_server" "77.88.8.8"
+    fi
+
+    jq --arg tag "$proxy_tag" --arg dns "$dns_server" '{
+        log: {level: "error", timestamp: false},
+        dns: {
+            servers: [{type: "udp", tag: "probe-dns", server: $dns}],
+            final: "probe-dns"
+        },
+        outbounds: .outbounds,
+        route: {
+            final: $tag,
+            default_domain_resolver: "probe-dns",
+            auto_detect_interface: true
+        }
+    }' "$sing_box_config_path" > "$out_path" 2> /dev/null || return 1
+
+    [ -s "$out_path" ]
+}
+
 check_proxy() {
     local sing_box_config_path
     config_get sing_box_config_path "settings" "config_path"
@@ -3197,30 +3243,68 @@ check_proxy() {
 
     nolog "Checking proxy connection..."
 
+    local probe_config probe_dir probe_err fetch_error rc
+    probe_config="/tmp/podkop-check-proxy.$$.json"
+    probe_dir="/tmp/podkop-check-proxy.$$"
+    probe_err="/tmp/podkop-check-proxy.$$.err"
+    fetch_error=""
+    rc=1
+
+    mkdir -p "$probe_dir"
+
+    if ! check_proxy_probe_config "$sing_box_config_path" "$probe_config"; then
+        rm -f "$probe_config"
+        probe_config=""
+    fi
+
     for attempt in $(seq 1 5); do
-        response=$(sing-box tools fetch ifconfig.me -D /etc/sing-box 2> /dev/null)
+        if [ -n "$probe_config" ]; then
+            response=$(sing-box tools fetch https://ifconfig.me/ip -c "$probe_config" -D "$probe_dir" 2> "$probe_err")
+        else
+            response=$(sing-box tools fetch https://ifconfig.me/ip -D /etc/sing-box 2> "$probe_err")
+        fi
+
+        # Why a fetch produced nothing used to be discarded together with
+        # stderr, which is how "initialize cache-file: timeout" hid behind a
+        # bare "Empty response" while the tunnel itself was healthy.
+        if [ -z "$response" ] && [ -s "$probe_err" ]; then
+            fetch_error="$(grep -v 'is deprecated in sing-box' "$probe_err" | tail -n 2)"
+        fi
+
         if echo "$response" | grep -q "^<html\|403 Forbidden"; then
             continue
         fi
-        if [[ $response =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+
+        if is_ipv4 "$response"; then
             ip=$(echo "$response" | sed -n 's/^[0-9]\+\.[0-9]\+\.[0-9]\+\.\([0-9]\+\)$/X.X.X.\1/p')
             nolog "$ip - should match proxy IP"
-            return 0
-        elif echo "$response" | grep -q "^[0-9a-fA-F:]*::[0-9a-fA-F:]*$\|^[0-9a-fA-F:]\+$"; then
+            rc=0
+            break
+        fi
+
+        if echo "$response" | grep -q "^[0-9a-fA-F:]*::[0-9a-fA-F:]*$\|^[0-9a-fA-F:]\+$"; then
             ip=$(echo "$response" | sed 's/\([0-9a-fA-F]\+:[0-9a-fA-F]\+:[0-9a-fA-F]\+\):.*/\1:XXXX:XXXX:XXXX/')
             nolog "$ip - should match proxy IP"
-            return 0
-        fi
-        if [ $attempt -eq 5 ]; then
-            nolog "Failed to get valid IP address after 5 attempts"
-            if [ -z "$response" ]; then
-                nolog "Error: Empty response"
-            else
-                nolog "Error response: $response"
-            fi
-            return 1
+            rc=0
+            break
         fi
     done
+
+    if [ "$rc" -ne 0 ]; then
+        nolog "Failed to get valid IP address after 5 attempts"
+        if [ -n "$response" ]; then
+            nolog "Error response: $response"
+        elif [ -n "$fetch_error" ]; then
+            nolog "Error: $fetch_error"
+        else
+            nolog "Error: Empty response"
+        fi
+    fi
+
+    rm -rf "$probe_dir" "$probe_err"
+    [ -n "$probe_config" ] && rm -f "$probe_config"
+
+    return $rc
 }
 
 check_nft() {
